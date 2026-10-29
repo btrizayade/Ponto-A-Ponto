@@ -3,6 +3,7 @@ from heapq import heappop, heappush
 from itertools import count
 
 from app.domain.models import Pedido
+from app.domain.priority_scoring import calcular_prioridade
 
 
 class FilaPrioridade:
@@ -11,6 +12,12 @@ class FilaPrioridade:
     def __init__(self) -> None:
         self._itens: list[tuple[float, int, Pedido]] = []
         self._ordem = count()
+
+    def adicionar_pedido(self, pedido: Pedido) -> None:
+        """Calcula a prioridade e adiciona o pedido a fila."""
+
+        prioridade = calcular_prioridade(pedido)
+        self.adicionar(pedido, prioridade)
 
     def adicionar(self, pedido: Pedido, prioridade: float) -> None:
         """Adiciona um pedido com sua pontuacao de prioridade."""

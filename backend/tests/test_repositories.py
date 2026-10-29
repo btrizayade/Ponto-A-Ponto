@@ -11,7 +11,10 @@ from app.infrastructure.cenario_repository import (
     listar_cenarios,
     obter_ou_criar_cenario,
 )
-from app.infrastructure.pedido_repository import obter_ou_criar_pedido
+from app.infrastructure.pedido_repository import (
+    listar_pedidos_por_cenario,
+    obter_ou_criar_pedido,
+)
 
 
 @pytest.fixture
@@ -96,3 +99,44 @@ def test_pedido_nao_e_duplicado(banco_temporario):
 
     assert len(registros) == 1
     assert registros[0]["status"] == "pendente"
+
+
+def test_listar_pedidos_por_cenario_recupera_dados(banco_temporario):
+    cenario = obter_ou_criar_cenario(
+        Cenario(
+            codigo="NORMAL",
+            nome="Operacao normal",
+        )
+    )
+
+    bairro = obter_ou_criar_bairro(
+        Bairro(
+            nome="Comercio",
+            latitude=-12.963,
+            longitude=-38.507,
+        )
+    )
+
+    pedido = Pedido(
+        codigo="PED-001",
+        bairro=bairro,
+        categoria_produto=CategoriaProduto.MEDICAMENTO,
+        cliente_clube=True,
+        entrega_rapida=True,
+        sla_dias_uteis=1,
+    )
+
+    obter_ou_criar_pedido(pedido, cenario.id)
+
+    pedidos = listar_pedidos_por_cenario(cenario.id)
+
+    assert len(pedidos) == 1
+
+    recuperado = pedidos[0]
+
+    assert recuperado.codigo == "PED-001"
+    assert recuperado.bairro.nome == "Comercio"
+    assert recuperado.categoria_produto == CategoriaProduto.MEDICAMENTO
+    assert recuperado.cliente_clube is True
+    assert recuperado.entrega_rapida is True
+    assert recuperado.sla_dias_uteis == 1
