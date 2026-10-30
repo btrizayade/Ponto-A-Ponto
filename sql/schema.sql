@@ -48,6 +48,9 @@ CREATE TABLE IF NOT EXISTS pedidos (
     sla_dias_uteis INTEGER NOT NULL
         CHECK (sla_dias_uteis > 0),
 
+    criado_em TEXT NOT NULL,
+    prazo_entrega_em TEXT NOT NULL,
+
     peso_kg REAL NOT NULL DEFAULT 0
         CHECK (peso_kg >= 0),
 

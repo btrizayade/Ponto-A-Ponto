@@ -1,4 +1,6 @@
 
+from datetime import datetime, timedelta, timezone
+
 import pytest
 
 from app.domain.models import (
@@ -147,3 +149,70 @@ def test_cenario_rejeita_codigo_vazio() -> None:
 def test_cenario_rejeita_nome_vazio() -> None:
     with pytest.raises(ValueError):
         Cenario(codigo="TESTE", nome=" ")
+
+
+def test_pedido_tem_data_de_criacao_com_fuso_horario():
+    bairro = Bairro(
+        nome="Comercio",
+        latitude=-12.963,
+        longitude=-38.507,
+    )
+
+    pedido = Pedido(
+        codigo="PED-TEMPO-001",
+        bairro=bairro,
+        categoria_produto=CategoriaProduto.MEDICAMENTO,
+        cliente_clube=True,
+        entrega_rapida=True,
+        sla_dias_uteis=1,
+    )
+
+    assert pedido.criado_em.tzinfo is not None
+    assert pedido.criado_em.utcoffset() is not None
+    assert pedido.prazo_entrega_em is None
+
+
+def test_pedido_rejeita_prazo_anterior_a_criacao():
+    criado_em = datetime(2026, 10, 29, 12, 0, tzinfo=timezone.utc)
+    prazo_entrega_em = criado_em - timedelta(hours=1)
+
+    bairro = Bairro(
+        nome="Comercio",
+        latitude=-12.963,
+        longitude=-38.507,
+    )
+
+    with pytest.raises(ValueError, match="posterior a criacao"):
+        Pedido(
+            codigo="PED-TEMPO-002",
+            bairro=bairro,
+            categoria_produto=CategoriaProduto.MEDICAMENTO,
+            cliente_clube=True,
+            entrega_rapida=True,
+            sla_dias_uteis=1,
+            criado_em=criado_em,
+            prazo_entrega_em=prazo_entrega_em,
+        )
+
+
+def test_pedido_rejeita_prazo_sem_fuso_horario():
+    criado_em = datetime(2026, 10, 29, 12, 0, tzinfo=timezone.utc)
+    prazo_entrega_em = datetime(2026, 10, 30, 12, 0)
+
+    bairro = Bairro(
+        nome="Comercio",
+        latitude=-12.963,
+        longitude=-38.507,
+    )
+
+    with pytest.raises(ValueError, match="fuso horario"):
+        Pedido(
+            codigo="PED-TEMPO-003",
+            bairro=bairro,
+            categoria_produto=CategoriaProduto.MEDICAMENTO,
+            cliente_clube=True,
+            entrega_rapida=True,
+            sla_dias_uteis=1,
+            criado_em=criado_em,
+            prazo_entrega_em=prazo_entrega_em,
+        )

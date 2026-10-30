@@ -1,7 +1,7 @@
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from enum import Enum
-
 
 class CategoriaProduto(str, Enum):
     """Categorias de produtos aceitas pelo sistema."""
@@ -74,6 +74,10 @@ class Pedido:
     cliente_clube: bool
     entrega_rapida: bool
     sla_dias_uteis: int
+    criado_em: datetime = field(
+        default_factory=lambda: datetime.now(timezone.utc)
+    )
+    prazo_entrega_em: datetime | None = None
     peso_kg: float = 0.0
     volume_l: float = 0.0
     tempo_servico_min: int = 5
@@ -83,7 +87,7 @@ class Pedido:
         """Valida os dados essenciais do pedido."""
 
         if not self.codigo.strip():
-            raise ValueError("O código do pedido não pode ser vazio.")
+            raise ValueError("O codigo do pedido nao pode ser vazio.")
 
         if not isinstance(self.bairro, Bairro):
             raise TypeError("O pedido deve referenciar um objeto Bairro.")
@@ -92,16 +96,38 @@ class Pedido:
             raise ValueError("O SLA deve ser maior que zero.")
 
         if self.peso_kg < 0 or self.volume_l < 0:
-            raise ValueError("Peso e volume não podem ser negativos.")
+            raise ValueError("Peso e volume nao podem ser negativos.")
 
         if self.tempo_servico_min < 0:
             raise ValueError(
-                "O tempo de serviço não pode ser negativo."
+                "O tempo de servico nao pode ser negativo."
             )
+
+        if (
+            self.criado_em.tzinfo is None
+            or self.criado_em.utcoffset() is None
+        ):
+            raise ValueError(
+                "A data de criacao deve ter fuso horario."
+            )
+
+        if self.prazo_entrega_em is not None:
+            if (
+                self.prazo_entrega_em.tzinfo is None
+                or self.prazo_entrega_em.utcoffset() is None
+            ):
+                raise ValueError(
+                    "O prazo de entrega deve ter fuso horario."
+                )
+
+            if self.prazo_entrega_em <= self.criado_em:
+                raise ValueError(
+                    "O prazo de entrega deve ser posterior a criacao."
+                )
 
     @property
     def produto_prioritario(self) -> bool:
-        """Indica se a categoria do produto é prioritária."""
+        """Indica se a categoria do produto e prioritaria."""
 
         return self.categoria_produto in {
             CategoriaProduto.ALIMENTO,
