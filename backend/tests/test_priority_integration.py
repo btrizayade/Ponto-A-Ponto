@@ -1,7 +1,7 @@
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
-from app.domain.priority_queue import FilaPrioridade
+from app.domain.priority_queue import FilaPrioridadeHeap
 from app.domain.priority_scoring import calcular_prioridade
 from app.infrastructure import database
 from app.infrastructure.cenario_repository import listar_cenarios
@@ -73,7 +73,7 @@ def test_motor_prioridade_classifica_cenario_normal_completo(
         "PED-008": 6,
     }
 
-    fila = FilaPrioridade()
+    fila = FilaPrioridadeHeap()
     pontuacoes_obtidas = {}
 
     for pedido in pedidos:
@@ -101,7 +101,7 @@ def test_motor_prioridade_classifica_cenario_normal_completo(
     ordem_obtida = []
 
     while not fila.esta_vazia():
-        pedido = fila.retirar_proximo(agora=agora)
+        pedido = fila.retirar_proximo()
         ordem_obtida.append(pedido.codigo)
 
     ordem_esperada = [
@@ -119,3 +119,5 @@ def test_motor_prioridade_classifica_cenario_normal_completo(
 
     assert ordem_obtida == ordem_esperada
     assert len(ordem_obtida) == 10
+    assert len(set(ordem_obtida)) == 10
+    assert fila.esta_vazia()
