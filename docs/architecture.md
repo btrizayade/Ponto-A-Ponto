@@ -22,6 +22,26 @@ A fila de prioridade baseada em heap selecionará os pedidos para despacho. Um c
 
 Um serviço de roteamento consultará a API de mapas para obter estimativas de deslocamento e geometrias dos trajetos. A lógica de negócio deverá permitir o uso de um provedor simulado em testes.
 
+Implementação (F04):
+
+- `app/domain/routing.py`: porta `ServicoRoteamento`, modelos `Coordenada`, `MatrizDistancias`, `RotaCalculada` e a função `estimar_tempo_entrega_min`, que alimenta o risco de SLA do motor de prioridade (F02).
+- `app/domain/polyline.py`: codificação e decodificação de Encoded Polyline, usada na geometria das rotas.
+- `app/infrastructure/google_routes.py`: adaptador da Google Routes API (`computeRouteMatrix` para a matriz de distâncias e `computeRoutes` para rota com paradas e geometria), considerando o trânsito (`TRAFFIC_AWARE`).
+- `app/infrastructure/simulated_routing.py`: provedor offline e determinístico (distância haversine, velocidade média e fator de trânsito por horário ou fixo por cenário).
+- `app/infrastructure/routing_factory.py`: escolhe o provedor pelas variáveis `PROVEDOR_MAPAS` e `GOOGLE_MAPS_API_KEY`.
+- `app/infrastructure/cache_roteamento.py`: cache no SQLite (tabelas `cache_matriz_rotas` e `cache_rotas`) que reaproveita consultas iguais dentro da mesma faixa de horário. Na matriz, o cache é por par origem-destino, só os pares ausentes são consultados e coordenadas repetidas viram um único ponto. Consultas atendidas pelo cache não consomem o limite diário.
+- `app/infrastructure/controle_uso_api.py`: limite diário de consultas à Google, salvo no SQLite (tabela `uso_api_mapas`), que bloqueia novas chamadas ao atingir o teto.
+
+Variáveis lidas de `backend/.env` (carregado por `app/config.py`, nunca commitado):
+
+| Variável | Uso |
+|---|---|
+| `GOOGLE_MAPS_API_KEY` | Chave da Google Routes API. |
+| `PROVEDOR_MAPAS` | `google` ou `simulado`. Sem valor, usa `google` se houver chave. |
+| `LIMITE_DIARIO_ELEMENTOS_MATRIZ` | Teto diário de elementos de matriz (padrão 150). |
+| `LIMITE_DIARIO_ROTAS` | Teto diário de rotas (padrão 50). |
+| `CACHE_ROTAS_JANELA_MIN` | Duração da faixa de horário do cache, em minutos (padrão 15). |
+
 ## Princípio de organização
 
 A lógica de domínio não deve depender do React, nem realizar chamadas HTTP diretamente para o Google Maps. As dependências externas devem ser encapsuladas em serviços e adaptadores próprios.
