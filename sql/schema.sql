@@ -87,3 +87,13 @@ CREATE INDEX IF NOT EXISTS idx_pedidos_cenario_status
 
 CREATE INDEX IF NOT EXISTS idx_pedidos_bairro
     ON pedidos (bairro_id);
+
+CREATE TABLE IF NOT EXISTS uso_api_mapas (
+    data TEXT NOT NULL,
+    tipo TEXT NOT NULL
+        CHECK (tipo IN ('elementos_matriz', 'rotas')),
+    quantidade INTEGER NOT NULL DEFAULT 0
+        CHECK (quantidade >= 0),
+
+    PRIMARY KEY (data, tipo)
+);
