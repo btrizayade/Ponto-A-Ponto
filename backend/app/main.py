@@ -1,3 +1,4 @@
+import app.config  # noqa: F401  Carrega o backend/.env.
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 

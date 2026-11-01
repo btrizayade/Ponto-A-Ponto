@@ -87,3 +87,38 @@ CREATE INDEX IF NOT EXISTS idx_pedidos_cenario_status
 
 CREATE INDEX IF NOT EXISTS idx_pedidos_bairro
     ON pedidos (bairro_id);
+
+CREATE TABLE IF NOT EXISTS uso_api_mapas (
+    data TEXT NOT NULL,
+    tipo TEXT NOT NULL
+        CHECK (tipo IN ('elementos_matriz', 'rotas')),
+    quantidade INTEGER NOT NULL DEFAULT 0
+        CHECK (quantidade >= 0),
+
+    PRIMARY KEY (data, tipo)
+);
+
+CREATE TABLE IF NOT EXISTS cache_matriz_rotas (
+    perfil TEXT NOT NULL,
+    origem TEXT NOT NULL,
+    destino TEXT NOT NULL,
+    faixa_horario TEXT NOT NULL,
+    rota_existe INTEGER NOT NULL
+        CHECK (rota_existe IN (0, 1)),
+    distancia_m INTEGER NOT NULL DEFAULT 0,
+    duracao_s REAL NOT NULL DEFAULT 0,
+    duracao_sem_transito_s REAL NOT NULL DEFAULT 0,
+    criado_em TEXT NOT NULL,
+
+    PRIMARY KEY (perfil, origem, destino, faixa_horario)
+);
+
+CREATE TABLE IF NOT EXISTS cache_rotas (
+    perfil TEXT NOT NULL,
+    paradas TEXT NOT NULL,
+    faixa_horario TEXT NOT NULL,
+    dados TEXT NOT NULL,
+    criado_em TEXT NOT NULL,
+
+    PRIMARY KEY (perfil, paradas, faixa_horario)
+);
