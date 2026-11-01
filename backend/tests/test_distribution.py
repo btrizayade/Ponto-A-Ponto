@@ -9,6 +9,9 @@ from app.domain.distribution import (
     DistribuicaoOrdemDaFila,
     DistribuidorPedidos,
     MapaDeslocamentos,
+    Parada,
+    _Avaliador,
+    montar_plano,
 )
 from app.domain.models import Bairro, CategoriaProduto, Entregador, Pedido
 from app.domain.priority_queue import FilaPrioridadeHeap
@@ -235,6 +238,165 @@ def test_pedido_mais_prioritario_e_entregue_antes_no_mesmo_ponto():
     assert [p.pedido.codigo for p in plano.paradas] == ["ALTA", "BAIXA"]
 
 
+def duracao_ate(bairro: Bairro) -> float:
+    """Minutos do centro ate o bairro no provedor simulado."""
+
+    pedido = criar_pedido("REF", bairro)
+    mapa = MapaDeslocamentos.calcular(
+        ServicoRoteamentoSimulado(fator_transito=1.0),
+        CENTRO,
+        [pedido],
+        PARTIDA,
+    )
+
+    return mapa.duracao_min(None, pedido)
+
+
+def test_parada_atrasada_considera_a_conclusao_da_entrega():
+    prazo = PARTIDA + timedelta(hours=1)
+    parada = Parada(
+        criar_pedido("P1", BARRA, prazo=prazo),
+        chegada_em=prazo - timedelta(minutes=2),
+        saida_em=prazo + timedelta(minutes=3),
+    )
+
+    assert parada.folga_min == pytest.approx(-3)
+    assert parada.atrasada
+
+
+def test_prazo_e_avaliado_na_conclusao_da_entrega():
+    # Chegando em segundo, BAIXA chega antes do prazo, mas so
+    # termina o servico depois dele.
+    prazo = PARTIDA + timedelta(minutes=duracao_ate(BARRA) + 7)
+    pedidos = [
+        criar_pedido("ALTA", BARRA),
+        criar_pedido("BAIXA", BARRA, prazo=prazo),
+    ]
+
+    plano = criar_distribuidor([Entregador("CAM-01")]).planejar(
+        pedidos, PARTIDA
+    )
+
+    assert [p.pedido.codigo for p in plano.paradas] == ["BAIXA", "ALTA"]
+    assert plano.pedidos_atrasados == []
+
+
+def criar_avaliador(pedidos):
+    mapa = MapaDeslocamentos.calcular(
+        ServicoRoteamentoSimulado(fator_transito=1.0),
+        CENTRO,
+        pedidos,
+        PARTIDA,
+    )
+
+    return _Avaliador(pedidos, mapa, PARTIDA)
+
+
+def test_peso_de_prioridade_cai_pela_metade_a_cada_posicao():
+    pedidos = [criar_pedido(f"P{i}", BARRA) for i in range(1, 5)]
+
+    avaliador = criar_avaliador(pedidos)
+
+    assert [avaliador.peso_prioridade[p.codigo] for p in pedidos] == [
+        1, 0.5, 0.25, 0.125
+    ]
+
+
+@pytest.mark.parametrize(
+    ("primeiro", "segundo"),
+    [
+        (BARRA, BROTAS),
+        (BROTAS, PITUBA),
+        (PITUBA, RIO_VERMELHO),
+        (RIO_VERMELHO, BARRA),
+    ],
+)
+def test_mais_prioritario_vai_antes_quando_os_destinos_sao_proximos(
+    primeiro, segundo
+):
+    pedidos = [criar_pedido("P1", primeiro), criar_pedido("P2", segundo)]
+
+    plano = criar_distribuidor([Entregador("CAM-01")]).planejar(
+        pedidos, PARTIDA
+    )
+
+    assert [p.pedido.codigo for p in plano.paradas] == ["P1", "P2"]
+
+
+def test_prioritario_distante_pode_esperar_um_pedido_proximo():
+    # A prioridade e um fator de otimizacao: P1 conclui alguns minutos
+    # mais tarde para P2, perto do centro, nao esperar a ida a Itapua.
+    pedidos = [criar_pedido("P1", ITAPUA), criar_pedido("P2", BARRA)]
+
+    plano = criar_distribuidor([Entregador("CAM-01")]).planejar(
+        pedidos, PARTIDA
+    )
+
+    assert [p.pedido.codigo for p in plano.paradas] == ["P2", "P1"]
+
+
+def test_pedido_urgente_vai_em_viagem_anterior_para_cumprir_o_sla():
+    # Uma parada por viagem: P2 so cumpre o prazo se sair primeiro.
+    prazo = PARTIDA + timedelta(minutes=duracao_ate(PITUBA) + 10)
+    pedidos = [
+        criar_pedido("P1", BARRA),
+        criar_pedido("P2", PITUBA, prazo=prazo),
+    ]
+    entregador = Entregador("CAM-01", max_paradas_por_viagem=1)
+
+    plano = criar_distribuidor([entregador]).planejar(pedidos, PARTIDA)
+
+    assert [p.pedido.codigo for p in plano.paradas] == ["P2", "P1"]
+    assert plano.pedidos_atrasados == []
+
+
+def test_pedido_do_mesmo_bairro_vai_na_viagem_do_mais_prioritario():
+    # P5 e o ultimo da fila, mas vai para Itapua junto com P1.
+    pedidos = [
+        criar_pedido("P1", ITAPUA),
+        criar_pedido("P2", BARRA),
+        criar_pedido("P3", BROTAS),
+        criar_pedido("P4", PITUBA),
+        criar_pedido("P5", ITAPUA),
+    ]
+    entregador = Entregador("CAM-01", max_paradas_por_viagem=3)
+
+    plano = criar_distribuidor([entregador]).planejar(pedidos, PARTIDA)
+    _, viagem = plano.rota_do_pedido("P1")
+
+    assert "P5" in [p.codigo for p in viagem.pedidos]
+    assert len(plano.rotas[0].viagens) == 2
+
+
+def test_ordem_dentro_da_viagem_continua_otimizada():
+    plano = criar_distribuidor().planejar(PEDIDOS, PARTIDA)
+    posicao = {p.codigo: i for i, p in enumerate(PEDIDOS)}
+    mapa = MapaDeslocamentos.calcular(
+        ServicoRoteamentoSimulado(fator_transito=1.0),
+        CENTRO,
+        PEDIDOS,
+        PARTIDA,
+    )
+
+    # Mesmas viagens, mas com as paradas na ordem exata da fila.
+    na_ordem_da_fila = montar_plano(
+        [
+            [
+                sorted(v.pedidos, key=lambda p: posicao[p.codigo])
+                for v in rota.viagens
+            ]
+            for rota in plano.rotas
+        ],
+        [rota.entregador for rota in plano.rotas],
+        CENTRO,
+        mapa,
+        PARTIDA,
+        [0, 0],
+    )
+
+    assert plano.distancia_total_m < na_ordem_da_fila.distancia_total_m
+
+
 def test_horarios_e_distancias_sao_consistentes():
     plano = criar_distribuidor().planejar(PEDIDOS, PARTIDA)
 
@@ -275,6 +437,48 @@ def test_disponibilidade_atrasa_a_saida_do_entregador():
     assert plano.rotas[0].viagens[0].partida_em == disponivel
 
 
+def test_disponibilidade_anterior_ao_inicio_e_rejeitada():
+    with pytest.raises(ValueError, match="anterior"):
+        criar_distribuidor().planejar(
+            PEDIDOS,
+            PARTIDA,
+            disponibilidade={"CAM-01": PARTIDA - timedelta(minutes=1)},
+        )
+
+
+def test_disponibilidade_de_entregador_inexistente_e_rejeitada():
+    with pytest.raises(ValueError, match="CAM-99"):
+        criar_distribuidor().planejar(
+            PEDIDOS,
+            PARTIDA,
+            disponibilidade={"CAM-99": PARTIDA},
+        )
+
+
+def test_disponibilidade_sem_fuso_e_rejeitada():
+    with pytest.raises(ValueError):
+        criar_distribuidor().planejar(
+            PEDIDOS,
+            PARTIDA,
+            disponibilidade={"CAM-01": datetime(2026, 10, 30, 10)},
+        )
+
+
+def test_disponibilidade_em_outro_fuso_usa_o_mesmo_instante():
+    # 13:00 UTC equivale a 10:00 em America/Bahia (UTC-3).
+    disponivel = datetime(2026, 10, 30, 13, 0, tzinfo=ZoneInfo("UTC"))
+
+    plano = criar_distribuidor([Entregador("CAM-01")]).planejar(
+        PEDIDOS,
+        PARTIDA,
+        disponibilidade={"CAM-01": disponivel},
+    )
+
+    assert plano.rotas[0].viagens[0].partida_em == PARTIDA + timedelta(
+        hours=1
+    )
+
+
 def test_entregador_disponivel_depois_recebe_menos_pedidos():
     plano = criar_distribuidor().planejar(
         PEDIDOS,
@@ -304,13 +508,63 @@ class ServicoSemRotaParaItapua(ServicoRoteamentoSimulado):
         return matriz
 
 
-def test_pedido_sem_rota_fica_sem_atribuicao():
+@pytest.mark.parametrize(
+    "estrategia",
+    [DistribuicaoInsercaoMaisBarata, DistribuicaoOrdemDaFila],
+)
+def test_pedido_sem_rota_fica_sem_atribuicao(estrategia):
     plano = criar_distribuidor(
-        servico=ServicoSemRotaParaItapua()
+        estrategia=estrategia(),
+        servico=ServicoSemRotaParaItapua(),
     ).planejar(PEDIDOS, PARTIDA)
 
     assert [p.codigo for p in plano.nao_atribuidos] == ["P4"]
     assert len(plano.paradas) == len(PEDIDOS) - 1
+    assert plano.termino_em > PARTIDA
+
+
+def test_ordem_da_fila_abre_nova_viagem_se_o_trecho_nao_tem_rota():
+    # Itapua tem rota a partir do centro, mas nao a partir da Barra.
+    class SemRotaBarraItapua(ServicoRoteamentoSimulado):
+        def calcular_matriz(self, origens, destinos, partida_em=None):
+            matriz = super().calcular_matriz(origens, destinos, partida_em)
+            trecho = {Coordenada.do_bairro(BARRA), Coordenada.do_bairro(ITAPUA)}
+
+            for (i, j) in list(matriz.elementos):
+                if {origens[i], destinos[j]} == trecho:
+                    matriz.elementos[(i, j)] = ElementoMatriz(i, j, False)
+
+            return matriz
+
+    pedidos = [criar_pedido("P1", BARRA), criar_pedido("P2", ITAPUA)]
+
+    plano = criar_distribuidor(
+        [Entregador("CAM-01")],
+        estrategia=DistribuicaoOrdemDaFila(),
+        servico=SemRotaBarraItapua(fator_transito=1.0),
+    ).planejar(pedidos, PARTIDA)
+
+    assert [v.pedidos for v in plano.rotas[0].viagens] == [
+        [pedidos[0]],
+        [pedidos[1]],
+    ]
+    assert plano.nao_atribuidos == []
+
+
+def test_montar_plano_rejeita_viagem_sem_rota():
+    mapa = MapaDeslocamentos.calcular(
+        ServicoSemRotaParaItapua(), CENTRO, PEDIDOS, PARTIDA
+    )
+
+    with pytest.raises(ValueError, match="sem rota"):
+        montar_plano(
+            [[[PEDIDOS[3]]]],
+            [Entregador("CAM-01")],
+            CENTRO,
+            mapa,
+            PARTIDA,
+            [0],
+        )
 
 
 def test_sem_pedidos_gera_plano_vazio_sem_consultar_mapa():

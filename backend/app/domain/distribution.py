@@ -18,7 +18,15 @@ from app.domain.routing import (
 # Pesos da funcao de custo, em minutos equivalentes.
 PENALIDADE_ATRASO_MIN = 240.0
 PESO_MINUTO_ATRASO = 2.0
-PESO_PRIORIDADE = 0.5
+# Cada pedido custa peso x minuto de conclusao da entrega. O peso
+# cai pela metade a cada posicao da fila (1, 0.5, 0.25...), entao
+# os primeiros pedidos dominam e o peso nao depende do tamanho da
+# fila.
+PESO_PRIORIDADE = 1.0
+FATOR_PESO_PRIORIDADE = 0.5
+# Cobrada por par de pedidos da mesma viagem entregues fora da
+# ordem da fila.
+PENALIDADE_INVERSAO_MIN = 5.0
 PESO_TERMINO = 1.0
 
 MAX_RODADAS_MELHORIA = 50
@@ -54,18 +62,23 @@ class Parada:
 
     @property
     def folga_min(self) -> float | None:
-        """Minutos entre a chegada e o prazo (negativo se atrasada)."""
+        """
+        Minutos entre a conclusao da entrega e o prazo.
+
+        A entrega so termina depois do tempo de servico no local,
+        como no motor de prioridade (F02). Negativo se atrasada.
+        """
 
         if self.pedido.prazo_entrega_em is None:
             return None
 
         return (
-            self.pedido.prazo_entrega_em - self.chegada_em
+            self.pedido.prazo_entrega_em - self.saida_em
         ).total_seconds() / 60
 
     @property
     def atrasada(self) -> bool:
-        """Indica se a chegada ocorre depois do prazo de entrega."""
+        """Indica se a entrega e concluida depois do prazo."""
 
         folga = self.folga_min
 
@@ -280,10 +293,10 @@ class _Avaliador:
         mapa: MapaDeslocamentos,
         partida_em: datetime,
     ) -> None:
-        total = len(pedidos)
         self._mapa = mapa
-        self._peso_prioridade = {
-            p.codigo: (total - posicao) / total
+        self.posicao = {p.codigo: i for i, p in enumerate(pedidos)}
+        self.peso_prioridade = {
+            p.codigo: FATOR_PESO_PRIORIDADE**posicao
             for posicao, p in enumerate(pedidos)
         }
         self._prazo_min = {
@@ -309,6 +322,9 @@ class _Avaliador:
 
             for pedido in viagem:
                 instante += self._mapa.duracao_min(anterior, pedido)
+                instante += pedido.tempo_servico_min
+
+                # O SLA vale para a conclusao da entrega (F02).
                 atraso = instante - self._prazo_min[pedido.codigo]
 
                 if atraso > 0:
@@ -318,16 +334,28 @@ class _Avaliador:
 
                 penalidades += (
                     PESO_PRIORIDADE
-                    * self._peso_prioridade[pedido.codigo]
+                    * self.peso_prioridade[pedido.codigo]
                     * instante
                 )
 
-                instante += pedido.tempo_servico_min
                 anterior = pedido
 
             instante += self._mapa.duracao_min(anterior, None)
+            penalidades += PENALIDADE_INVERSAO_MIN * self._inversoes(viagem)
 
         return (instante - inicio_min) + penalidades, instante
+
+    def _inversoes(self, viagem: list[Pedido]) -> int:
+        """Pares em que um pedido menos prioritario e entregue antes."""
+
+        posicoes = [self.posicao[p.codigo] for p in viagem]
+
+        return sum(
+            1
+            for i, anterior in enumerate(posicoes)
+            for posterior in posicoes[i + 1:]
+            if anterior > posterior
+        )
 
 
 def _cabe_no_entregador(pedido: Pedido, entregador: Entregador) -> bool:
@@ -348,6 +376,17 @@ def _cabe_na_viagem(
         <= entregador.capacidade_peso_kg
         and sum(p.volume_l for p in viagem) + pedido.volume_l
         <= entregador.capacidade_volume_l
+    )
+
+
+def _viagem_tem_rota(viagem: list[Pedido], mapa: MapaDeslocamentos) -> bool:
+    """Indica se existe rota em todos os trechos da viagem."""
+
+    pontos = [None, *viagem, None]
+
+    return all(
+        isfinite(mapa.duracao_min(origem, destino))
+        for origem, destino in zip(pontos, pontos[1:])
     )
 
 
@@ -375,14 +414,37 @@ def _inicios_min(
     """Minutos apos a partida em que cada entregador pode sair."""
 
     disponibilidade = disponibilidade or {}
+    codigos = {e.codigo for e in entregadores}
+    desconhecidos = sorted(set(disponibilidade) - codigos)
+
+    if desconhecidos:
+        raise ValueError(
+            "Disponibilidade informada para entregadores inexistentes: "
+            + ", ".join(desconhecidos)
+            + "."
+        )
+
     inicios = []
 
     for entregador in entregadores:
         momento = disponibilidade.get(entregador.codigo, partida_em)
+
+        if momento is None:
+            raise ValueError(
+                f"Informe a disponibilidade do entregador "
+                f"{entregador.codigo}."
+            )
+
         validar_partida(momento)
-        inicios.append(
-            max(0.0, (momento - partida_em).total_seconds() / 60)
-        )
+
+        # Datetimes com fuso sao comparados pelo instante absoluto.
+        if momento < partida_em:
+            raise ValueError(
+                f"A disponibilidade do entregador {entregador.codigo} "
+                "e anterior ao inicio do plano."
+            )
+
+        inicios.append((momento - partida_em).total_seconds() / 60)
 
     return inicios
 
@@ -409,6 +471,12 @@ def montar_plano(
             distancia = 0
             paradas = []
             anterior = None
+
+            if not _viagem_tem_rota(pedidos_viagem, mapa):
+                raise ValueError(
+                    f"A viagem {numero} do entregador {entregador.codigo} "
+                    "possui trecho sem rota."
+                )
 
             for pedido in pedidos_viagem:
                 instante += timedelta(
@@ -450,10 +518,24 @@ class DistribuicaoInsercaoMaisBarata(EstrategiaDistribuicao):
     Os pedidos chegam na ordem da fila de prioridade (F03). Cada um
     e testado em todos os entregadores, viagens e posicoes, e tambem
     em uma nova viagem. Pedidos que nao cabem em nenhum entregador
-    ou que nao possuem rota a partir do centro ficam sem atribuicao. O custo soma a duracao das viagens, o termino
-    da operacao, penalidades por atraso de SLA e um peso que favorece
-    entregar antes os pedidos mais prioritarios. Ao final, uma etapa
-    de melhoria realoca pedidos enquanto o custo diminuir.
+    ou que nao possuem rota a partir do centro ficam sem atribuicao.
+
+    A prioridade da fila e um fator de otimizacao, nao uma restricao:
+    - cada pedido soma peso x minuto de conclusao da entrega, com
+      peso 1 para o primeiro da fila, 0.5 para o segundo, 0.25 para
+      o terceiro e assim por diante. Isso favorece concluir cedo os
+      primeiros da fila, em qualquer entregador;
+    - cada par de pedidos da mesma viagem entregue fora da ordem da
+      fila custa PENALIDADE_INVERSAO_MIN.
+    Um pedido menos prioritario pode passar a frente quando isso
+    economiza trajeto ou evita atraso de SLA. Um pedido prioritario
+    isolado e distante pode ficar para depois se isso adiantar
+    varios outros pedidos importantes.
+
+    O custo soma a duracao das viagens, o termino da operacao, as
+    penalidades por atraso de SLA (medido na conclusao da entrega)
+    e as penalidades por inversao. Ao final, uma etapa de melhoria
+    realoca pedidos enquanto o custo diminuir.
     """
 
     def distribuir(
@@ -596,11 +678,13 @@ def _candidatos(
         if not _cabe_na_viagem(pedido, viagem, entregador):
             continue
 
-        for posicao in range(len(viagem) + 1):
-            nova = viagem[:posicao] + [pedido] + viagem[posicao:]
+        for lugar in range(len(viagem) + 1):
+            nova = viagem[:lugar] + [pedido] + viagem[lugar:]
             candidatos.append(viagens[:indice] + [nova] + viagens[indice + 1:])
 
-    candidatos.append([*viagens, [pedido]])
+    # Nova viagem so com o pedido, antes, entre ou depois das demais.
+    for indice in range(len(viagens) + 1):
+        candidatos.append(viagens[:indice] + [[pedido]] + viagens[indice:])
 
     return candidatos
 
@@ -624,7 +708,9 @@ class DistribuicaoOrdemDaFila(EstrategiaDistribuicao):
     Distribui alternando os entregadores na ordem da fila.
 
     Cada entregador entrega exatamente na ordem de prioridade, sem
-    otimizar o trajeto. Serve como referencia de comparacao.
+    otimizar o trajeto. Pedidos que nao cabem em nenhum entregador
+    ou sem rota a partir do centro ficam sem atribuicao, como na
+    estrategia principal. Serve como referencia de comparacao.
     """
 
     def distribuir(
@@ -653,12 +739,16 @@ class DistribuicaoOrdemDaFila(EstrategiaDistribuicao):
 
                 viagens = estado[indice]
 
-                if viagens and _cabe_na_viagem(
-                    pedido, viagens[-1], entregador
+                if (
+                    viagens
+                    and _cabe_na_viagem(pedido, viagens[-1], entregador)
+                    and _viagem_tem_rota([*viagens[-1], pedido], mapa)
                 ):
                     viagens[-1].append(pedido)
-                else:
+                elif _viagem_tem_rota([pedido], mapa):
                     viagens.append([pedido])
+                else:
+                    continue
 
                 proximo = indice + 1
                 break
