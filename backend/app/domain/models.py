@@ -141,9 +141,26 @@ class Entregador:
 
     codigo: str
     id: int | None = None
+    max_paradas_por_viagem: int = 6
+    capacidade_peso_kg: float = 500.0
+    capacidade_volume_l: float = 3000.0
 
     def __post_init__(self) -> None:
         """Valida os dados essenciais do entregador."""
 
         if not self.codigo.strip():
             raise ValueError("O código do entregador não pode ser vazio.")
+
+        if (
+            isinstance(self.max_paradas_por_viagem, bool)
+            or not isinstance(self.max_paradas_por_viagem, int)
+            or self.max_paradas_por_viagem < 1
+        ):
+            raise ValueError(
+                "O maximo de paradas por viagem deve ser um inteiro positivo."
+            )
+
+        if self.capacidade_peso_kg <= 0 or self.capacidade_volume_l <= 0:
+            raise ValueError(
+                "As capacidades de peso e volume devem ser positivas."
+            )
