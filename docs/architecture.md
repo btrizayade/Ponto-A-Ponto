@@ -42,6 +42,20 @@ Variáveis lidas de `backend/.env` (carregado por `app/config.py`, nunca commita
 | `LIMITE_DIARIO_ELEMENTOS_MATRIZ` | Teto diário de elementos de matriz (padrão 150). |
 | `LIMITE_DIARIO_ROTAS` | Teto diário de rotas (padrão 50). |
 | `CACHE_ROTAS_JANELA_MIN` | Duração da faixa de horário do cache, em minutos (padrão 15). |
+| `CENTRO_DISTRIBUICAO_NOME` | Nome do centro de distribuição (padrão `Comercio`). |
+| `CENTRO_DISTRIBUICAO_LATITUDE` / `CENTRO_DISTRIBUICAO_LONGITUDE` | Coordenada do centro (padrão -12.971, -38.501). Devem ser definidas juntas. |
+| `QUANTIDADE_ENTREGADORES` | Quantidade de caminhões criados por padrão (padrão 2). |
+
+## Distribuição e montagem de rotas
+
+Implementação (F05):
+
+- `app/domain/distribution.py`: `DistribuidorPedidos` recebe os pedidos na ordem da fila de prioridade (F03), consulta uma única matriz de deslocamentos (F04) entre o centro de distribuição e os pedidos e aplica uma `EstrategiaDistribuicao`. O resultado é um `PlanoDistribuicao` com as viagens de cada entregador, os horários de chegada e saída de cada parada, as distâncias, os pedidos atrasados e os não atribuídos. `montar_rotas()` consulta a geometria de cada viagem.
+- `DistribuicaoInsercaoMaisBarata` (padrão): insere cada pedido no entregador, viagem e posição de menor custo e depois realoca pedidos enquanto o custo diminuir. O custo soma a duração das viagens, o término da operação, penalidades por atraso de SLA e um peso que favorece entregar antes os pedidos mais prioritários.
+- `DistribuicaoOrdemDaFila`: alterna os entregadores seguindo a ordem da fila, sem otimizar o trajeto. Serve como referência de comparação.
+- `Entregador` (`app/domain/models.py`) passou a ter `max_paradas_por_viagem` (padrão 6), `capacidade_peso_kg` (500) e `capacidade_volume_l` (3000). Quando a carga não cabe, o caminhão volta ao centro e faz outra viagem.
+- `app/infrastructure/distribution_config.py`: centro de distribuição e entregadores padrão a partir do `.env`.
+- `backend/scripts/analisar_distribuicao.py`: compara estratégias e centros no cenário do seed usando o provedor simulado, sem consumir a API. Execute a partir de `backend/` com `python -m scripts.analisar_distribuicao --help`.
 
 ## Princípio de organização
 
