@@ -116,11 +116,15 @@ class MatrizDistancias:
         return elemento.distancia_m
 
     def esta_completa(self) -> bool:
-        """Indica se todos os pares origem-destino foram calculados."""
+        """Indica se exatamente todos os pares esperados estao presentes."""
 
-        return len(self.elementos) == (
-            len(self.origens) * len(self.destinos)
-        )
+        esperados = {
+            (origem, destino)
+            for origem in range(len(self.origens))
+            for destino in range(len(self.destinos))
+        }
+
+        return set(self.elementos) == esperados
 
     def _elemento_com_rota(
         self,
@@ -193,7 +197,29 @@ class ServicoRoteamento(ABC):
     O dominio depende apenas desta abstracao. Implementacoes
     concretas (Google Routes API ou provedor simulado) ficam
     na camada de infraestrutura.
+
+    Pode ser usada com `with`, que chama fechar() ao final.
     """
+
+    @property
+    def perfil_consulta(self) -> str:
+        """
+        Identifica o provedor e as opcoes que afetam o resultado.
+
+        Usado pelo cache para nao misturar resultados de provedores
+        ou preferencias de roteamento diferentes.
+        """
+
+        return type(self).__name__
+
+    def fechar(self) -> None:
+        """Libera recursos do provedor, como clientes HTTP."""
+
+    def __enter__(self) -> "ServicoRoteamento":
+        return self
+
+    def __exit__(self, *_: object) -> None:
+        self.fechar()
 
     @abstractmethod
     def calcular_matriz(

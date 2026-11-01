@@ -109,17 +109,15 @@ class ServicoRoteamentoGoogle(ServicoRoteamento):
         self._relogio = relogio or (lambda: datetime.now(timezone.utc))
         self._controle_uso = controle_uso
 
+    @property
+    def perfil_consulta(self) -> str:
+        return f"google:{self._preferencia}"
+
     def fechar(self) -> None:
         """Fecha o cliente HTTP criado pelo proprio servico."""
 
         if self._cliente_proprio:
             self._cliente.close()
-
-    def __enter__(self) -> "ServicoRoteamentoGoogle":
-        return self
-
-    def __exit__(self, *_: object) -> None:
-        self.fechar()
 
     def calcular_matriz(
         self,

@@ -309,6 +309,29 @@ def test_chave_nao_aparece_na_mensagem_de_erro():
     assert "chave-teste" not in str(erro.value)
 
 
+# Ciclo de vida e perfil
+
+
+def test_fechar_encerra_somente_o_cliente_proprio():
+    externo = httpx.Client()
+    ServicoRoteamentoGoogle(chave_api="x", cliente_http=externo).fechar()
+    assert not externo.is_closed
+
+    with ServicoRoteamentoGoogle(chave_api="x") as servico:
+        cliente = servico._cliente
+    assert cliente.is_closed
+
+
+def test_perfil_inclui_a_preferencia_de_roteamento():
+    padrao = ServicoRoteamentoGoogle(chave_api="x")
+    sem_transito = ServicoRoteamentoGoogle(
+        chave_api="x", preferencia_roteamento="TRAFFIC_UNAWARE"
+    )
+
+    assert padrao.perfil_consulta == "google:TRAFFIC_AWARE"
+    assert sem_transito.perfil_consulta != padrao.perfil_consulta
+
+
 # Configuracao
 
 

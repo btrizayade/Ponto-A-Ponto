@@ -107,6 +107,20 @@ def test_matriz_sem_rota_gera_erro():
         matriz.duracao_min(0, 0)
 
 
+def test_matriz_com_indices_errados_nao_esta_completa():
+    # Mesma quantidade de elementos, mas um par fora dos limites.
+    matriz = MatrizDistancias(
+        origens=[CENTRO_DISTRIBUICAO],
+        destinos=[BARRA, PITUBA],
+        elementos={
+            (0, 0): ElementoMatriz(0, 0, True),
+            (0, 5): ElementoMatriz(0, 5, True),
+        },
+    )
+
+    assert not matriz.esta_completa()
+
+
 def test_fator_transito_do_elemento():
     elemento = ElementoMatriz(
         0, 0, True,

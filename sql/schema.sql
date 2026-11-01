@@ -99,6 +99,7 @@ CREATE TABLE IF NOT EXISTS uso_api_mapas (
 );
 
 CREATE TABLE IF NOT EXISTS cache_matriz_rotas (
+    perfil TEXT NOT NULL,
     origem TEXT NOT NULL,
     destino TEXT NOT NULL,
     faixa_horario TEXT NOT NULL,
@@ -109,14 +110,15 @@ CREATE TABLE IF NOT EXISTS cache_matriz_rotas (
     duracao_sem_transito_s REAL NOT NULL DEFAULT 0,
     criado_em TEXT NOT NULL,
 
-    PRIMARY KEY (origem, destino, faixa_horario)
+    PRIMARY KEY (perfil, origem, destino, faixa_horario)
 );
 
 CREATE TABLE IF NOT EXISTS cache_rotas (
+    perfil TEXT NOT NULL,
     paradas TEXT NOT NULL,
     faixa_horario TEXT NOT NULL,
     dados TEXT NOT NULL,
     criado_em TEXT NOT NULL,
 
-    PRIMARY KEY (paradas, faixa_horario)
+    PRIMARY KEY (perfil, paradas, faixa_horario)
 );

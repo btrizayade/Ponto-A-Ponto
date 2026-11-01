@@ -29,7 +29,8 @@ Implementação (F04):
 - `app/infrastructure/google_routes.py`: adaptador da Google Routes API (`computeRouteMatrix` para a matriz de distâncias e `computeRoutes` para rota com paradas e geometria), considerando o trânsito (`TRAFFIC_AWARE`).
 - `app/infrastructure/simulated_routing.py`: provedor offline e determinístico (distância haversine, velocidade média e fator de trânsito por horário ou fixo por cenário).
 - `app/infrastructure/routing_factory.py`: escolhe o provedor pelas variáveis `PROVEDOR_MAPAS` e `GOOGLE_MAPS_API_KEY`.
-- `app/infrastructure/cache_roteamento.py`: cache no SQLite (tabelas `cache_matriz_rotas` e `cache_rotas`) que reaproveita consultas iguais dentro da mesma faixa de horário. Na matriz, o cache é por par origem-destino, só os pares ausentes são consultados e coordenadas repetidas viram um único ponto. Consultas atendidas pelo cache não consomem o limite diário.
+- `app/infrastructure/cache_roteamento.py`: cache no SQLite (tabelas `cache_matriz_rotas` e `cache_rotas`) que reaproveita consultas iguais dentro da mesma faixa de horário e do mesmo perfil de consulta (provedor e preferência de roteamento). Na matriz, o cache é por par origem-destino e a consulta externa contém exclusivamente os pares ausentes: origens que precisam dos mesmos destinos são agrupadas em uma submatriz. Coordenadas repetidas viram um único ponto. Consultas atendidas pelo cache não consomem o limite diário.
+- Os serviços de roteamento podem ser usados com `with` ou encerrados com `fechar()`, que libera o cliente HTTP da Google também quando ele está envolvido pelo cache.
 - `app/infrastructure/controle_uso_api.py`: limite diário de consultas à Google, salvo no SQLite (tabela `uso_api_mapas`), que bloqueia novas chamadas ao atingir o teto.
 
 Variáveis lidas de `backend/.env` (carregado por `app/config.py`, nunca commitado):

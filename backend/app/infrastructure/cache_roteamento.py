@@ -31,10 +31,14 @@ class ServicoRoteamentoComCache(ServicoRoteamento):
     Envolve um servico de roteamento e reaproveita consultas iguais.
 
     O transito muda ao longo do dia, entao cada resultado vale para
-    uma faixa de horario (padrao de 15 minutos). Na matriz, o cache
-    e por par origem-destino: so os pares ausentes sao consultados,
-    e coordenadas repetidas (pedidos no mesmo bairro) viram um unico
-    ponto na consulta.
+    uma faixa de horario (padrao de 15 minutos) e para o perfil do
+    servico envolvido (provedor e preferencia de roteamento).
+
+    Na matriz, o cache e por par origem-destino. A consulta externa
+    contem exclusivamente os pares ausentes: as origens que precisam
+    do mesmo conjunto de destinos sao agrupadas em uma submatriz, e
+    coordenadas repetidas (pedidos no mesmo bairro) viram um unico
+    ponto.
     """
 
     def __init__(
@@ -56,8 +60,11 @@ class ServicoRoteamentoComCache(ServicoRoteamento):
         self._relogio = relogio or (lambda: datetime.now(timezone.utc))
         self._banco_pronto = False
 
-        self.acertos = 0
+        # Estatisticas de uso desde a criacao do servico.
         self.consultas_externas = 0
+        self.pares_do_cache = 0
+        self.pares_consultados = 0
+        self.rotas_do_cache = 0
 
     @classmethod
     def do_ambiente(
@@ -79,6 +86,15 @@ class ServicoRoteamentoComCache(ServicoRoteamento):
             ) from erro
 
         return cls(servico, janela_min=janela)
+
+    @property
+    def perfil_consulta(self) -> str:
+        return self._servico.perfil_consulta
+
+    def fechar(self) -> None:
+        """Fecha o servico envolvido, como o cliente HTTP da Google."""
+
+        self._servico.fechar()
 
     def calcular_matriz(
         self,
@@ -109,6 +125,11 @@ class ServicoRoteamentoComCache(ServicoRoteamento):
             if (origem, destino) not in conhecidos
         ]
 
+        total_pares = len(dict.fromkeys(chaves_origem)) * len(
+            dict.fromkeys(chaves_destino)
+        )
+        self.pares_do_cache += total_pares - len(faltantes)
+
         if faltantes:
             novos = self._consultar_pares(
                 faltantes,
@@ -118,8 +139,6 @@ class ServicoRoteamentoComCache(ServicoRoteamento):
             )
             self._salvar_pares(novos, faixa)
             conhecidos.update(novos)
-        else:
-            self.acertos += 1
 
         matriz = MatrizDistancias(
             origens=list(origens),
@@ -163,13 +182,13 @@ class ServicoRoteamentoComCache(ServicoRoteamento):
                 """
                 SELECT dados
                 FROM cache_rotas
-                WHERE paradas = ? AND faixa_horario = ?
+                WHERE perfil = ? AND paradas = ? AND faixa_horario = ?
                 """,
-                (chave, faixa),
+                (self.perfil_consulta, chave, faixa),
             ).fetchone()
 
         if registro is not None:
-            self.acertos += 1
+            self.rotas_do_cache += 1
             return _rota_de_json(registro["dados"])
 
         rota = self._servico.calcular_rota(
@@ -184,10 +203,16 @@ class ServicoRoteamentoComCache(ServicoRoteamento):
             conexao.execute(
                 """
                 INSERT OR REPLACE INTO cache_rotas
-                    (paradas, faixa_horario, dados, criado_em)
-                VALUES (?, ?, ?, ?)
+                    (perfil, paradas, faixa_horario, dados, criado_em)
+                VALUES (?, ?, ?, ?, ?)
                 """,
-                (chave, faixa, _rota_para_json(rota), self._agora_iso()),
+                (
+                    self.perfil_consulta,
+                    chave,
+                    faixa,
+                    _rota_para_json(rota),
+                    self._agora_iso(),
+                ),
             )
 
         return rota
@@ -208,22 +233,41 @@ class ServicoRoteamentoComCache(ServicoRoteamento):
         destinos_por_chave: dict[str, Coordenada],
         partida_em: datetime | None,
     ) -> dict[tuple[str, str], ElementoMatriz]:
-        """Consulta o servico real apenas com os pontos necessarios."""
+        """
+        Consulta somente os pares ausentes.
 
-        chaves_origem = list(dict.fromkeys(o for o, _ in faltantes))
-        chaves_destino = list(dict.fromkeys(d for _, d in faltantes))
+        Origens que precisam exatamente dos mesmos destinos formam
+        uma submatriz. Assim nenhuma combinacao ja armazenada e
+        consultada de novo, com poucas chamadas a API.
+        """
 
-        submatriz = self._servico.calcular_matriz(
-            [origens_por_chave[chave] for chave in chaves_origem],
-            [destinos_por_chave[chave] for chave in chaves_destino],
-            partida_em=partida_em,
-        )
-        self.consultas_externas += 1
+        destinos_por_origem: dict[str, list[str]] = {}
 
-        return {
-            (chaves_origem[i], chaves_destino[j]): elemento
-            for (i, j), elemento in submatriz.elementos.items()
-        }
+        for origem, destino in faltantes:
+            destinos_por_origem.setdefault(origem, []).append(destino)
+
+        grupos: dict[tuple[str, ...], list[str]] = {}
+
+        for origem, destinos in destinos_por_origem.items():
+            grupos.setdefault(tuple(destinos), []).append(origem)
+
+        novos = {}
+
+        for chaves_destino, chaves_origem in grupos.items():
+            submatriz = self._servico.calcular_matriz(
+                [origens_por_chave[chave] for chave in chaves_origem],
+                [destinos_por_chave[chave] for chave in chaves_destino],
+                partida_em=partida_em,
+            )
+            self.consultas_externas += 1
+            self.pares_consultados += (
+                len(chaves_origem) * len(chaves_destino)
+            )
+
+            for (i, j), elemento in submatriz.elementos.items():
+                novos[(chaves_origem[i], chaves_destino[j])] = elemento
+
+        return novos
 
     def _buscar_pares(
         self,
@@ -244,11 +288,12 @@ class ServicoRoteamentoComCache(ServicoRoteamento):
                 SELECT origem, destino, rota_existe, distancia_m,
                        duracao_s, duracao_sem_transito_s
                 FROM cache_matriz_rotas
-                WHERE faixa_horario = ?
+                WHERE perfil = ?
+                  AND faixa_horario = ?
                   AND origem IN ({marcadores_origem})
                   AND destino IN ({marcadores_destino})
                 """,
-                (faixa, *origens, *destinos),
+                (self.perfil_consulta, faixa, *origens, *destinos),
             ).fetchall()
 
         return {
@@ -276,14 +321,15 @@ class ServicoRoteamentoComCache(ServicoRoteamento):
             conexao.executemany(
                 """
                 INSERT OR REPLACE INTO cache_matriz_rotas (
-                    origem, destino, faixa_horario, rota_existe,
+                    perfil, origem, destino, faixa_horario, rota_existe,
                     distancia_m, duracao_s, duracao_sem_transito_s,
                     criado_em
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 [
                     (
+                        self.perfil_consulta,
                         origem,
                         destino,
                         faixa,

@@ -91,6 +91,11 @@ class ServicoRoteamentoSimulado(ServicoRoteamento):
         self._fator_transito = fator_transito
         self._relogio = relogio or (lambda: datetime.now(timezone.utc))
 
+    @property
+    def perfil_consulta(self) -> str:
+        fator = self._fator_transito or "horario"
+        return f"simulado:{self._velocidade_m_s:.3f}:{fator}"
+
     def calcular_matriz(
         self,
         origens: Sequence[Coordenada],

@@ -66,7 +66,8 @@ def test_matriz_repetida_nao_consulta_de_novo(banco_temporario):
     segunda = cache.calcular_matriz([CENTRO_DISTRIBUICAO], [BARRA, PITUBA])
 
     assert len(servico.matrizes) == 1
-    assert cache.acertos == 1
+    assert cache.pares_do_cache == 2
+    assert cache.pares_consultados == 2
     assert segunda.elementos == primeira.elementos
 
 
@@ -91,6 +92,58 @@ def test_so_os_pares_novos_sao_consultados(banco_temporario):
     assert servico.matrizes[1] == ([CENTRO_DISTRIBUICAO], [ITAPUA])
     assert matriz.esta_completa()
     assert matriz.obter(0, 2).destino_indice == 2
+
+
+def elementos_pedidos(servico) -> int:
+    return sum(len(o) * len(d) for o, d in servico.matrizes)
+
+
+def test_cache_parcial_com_varias_origens_consulta_so_os_ausentes(
+    banco_temporario,
+):
+    servico = ServicoContador()
+    cache = criar_cache(servico)
+    o1, o2, d1, d2 = CENTRO_DISTRIBUICAO, BARRA, PITUBA, ITAPUA
+
+    # O1-D1 e O2-D2 ja estao no cache.
+    cache.calcular_matriz([o1], [d1])
+    cache.calcular_matriz([o2], [d2])
+    servico.matrizes.clear()
+
+    matriz = cache.calcular_matriz([o1, o2], [d1, d2])
+
+    # Somente O1-D2 e O2-D1 sao consultados.
+    assert elementos_pedidos(servico) == 2
+    assert sorted(servico.matrizes, key=str) == sorted(
+        [([o1], [d2]), ([o2], [d1])], key=str
+    )
+    assert matriz.esta_completa()
+
+    direta = ServicoRoteamentoSimulado(relogio=lambda: AGORA)
+    esperada = direta.calcular_matriz([o1, o2], [d1, d2])
+    for par, elemento in esperada.elementos.items():
+        assert matriz.obter(*par).distancia_m == elemento.distancia_m
+
+
+def test_novo_pedido_em_matriz_quadrada_consulta_linha_e_coluna(
+    banco_temporario,
+):
+    servico = ServicoContador()
+    cache = criar_cache(servico)
+    pontos = [CENTRO_DISTRIBUICAO, BARRA, PITUBA, ITAPUA]
+    novo = Coordenada(-12.986, -38.482)
+
+    cache.calcular_matriz(pontos, pontos)
+    servico.matrizes.clear()
+
+    matriz = cache.calcular_matriz([*pontos, novo], [*pontos, novo])
+
+    # 4 origens antigas ate o novo ponto e o novo ate os 5 pontos.
+    assert elementos_pedidos(servico) == 2 * len(pontos) + 1
+    assert len(servico.matrizes) == 2
+    # Os 16 pares antigos vieram do cache na segunda consulta.
+    assert cache.pares_do_cache == 16
+    assert matriz.esta_completa()
 
 
 def test_coordenadas_repetidas_viram_um_ponto(banco_temporario):
@@ -163,6 +216,7 @@ def test_rota_repetida_vem_do_cache(banco_temporario):
     )
 
     assert len(servico.rotas) == 1
+    assert cache.rotas_do_cache == 1
     assert segunda == primeira
     assert segunda.pontos == primeira.pontos
 
@@ -179,6 +233,34 @@ def test_ordem_diferente_das_paradas_e_outra_rota(banco_temporario):
     )
 
     assert len(servico.rotas) == 2
+
+
+# Perfil e ciclo de vida
+
+
+def test_perfis_diferentes_nao_compartilham_cache(banco_temporario):
+    normal = ServicoContador()
+    intenso = ServicoContador()
+    intenso._fator_transito = 2.0
+
+    criar_cache(normal).calcular_matriz([CENTRO_DISTRIBUICAO], [BARRA])
+    matriz = criar_cache(intenso).calcular_matriz(
+        [CENTRO_DISTRIBUICAO], [BARRA]
+    )
+
+    assert len(intenso.matrizes) == 1
+    assert matriz.obter(0, 0).fator_transito == pytest.approx(2.0)
+
+
+def test_fechar_repassa_para_o_servico_envolvido():
+    servico = ServicoContador()
+    fechados = []
+    servico.fechar = lambda: fechados.append(True)
+
+    with criar_cache(servico):
+        pass
+
+    assert fechados == [True]
 
 
 # Configuracao
