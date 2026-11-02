@@ -10,6 +10,8 @@ React e Vite serão responsáveis pela interface, pelos controles de simulação
 
 Python e FastAPI exporão a API HTTP. A lógica de domínio será organizada com POO e separada das rotas HTTP.
 
+Os endpoints, o fluxo de uso e os formatos das respostas estão descritos em [api.md](api.md).
+
 ## Persistência
 
 SQLite armazenará os pedidos predefinidos, os dados dos entregadores, as simulações, as rotas e os eventos relevantes.
