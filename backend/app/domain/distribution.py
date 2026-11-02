@@ -784,6 +784,18 @@ class DistribuidorPedidos:
         self._entregadores = list(entregadores)
         self._estrategia = estrategia or DistribuicaoInsercaoMaisBarata()
 
+    @property
+    def centro(self) -> CentroDistribuicao:
+        return self._centro
+
+    @property
+    def entregadores(self) -> list[Entregador]:
+        return list(self._entregadores)
+
+    @property
+    def estrategia(self) -> EstrategiaDistribuicao:
+        return self._estrategia
+
     def planejar(
         self,
         pedidos: Sequence[Pedido],
