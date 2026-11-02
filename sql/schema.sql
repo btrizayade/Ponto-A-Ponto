@@ -122,3 +122,101 @@ CREATE TABLE IF NOT EXISTS cache_rotas (
 
     PRIMARY KEY (perfil, paradas, faixa_horario)
 );
+
+CREATE TABLE IF NOT EXISTS simulacoes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    cenario_id INTEGER,
+    criada_em TEXT NOT NULL,
+    inicio_simulado TEXT NOT NULL,
+    fim_simulado TEXT,
+    centro_nome TEXT NOT NULL,
+    estrategia TEXT NOT NULL,
+    entregadores TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'em_andamento'
+        CHECK (status IN ('em_andamento', 'concluida')),
+
+    FOREIGN KEY (cenario_id)
+        REFERENCES cenarios(id)
+        ON DELETE SET NULL
+);
+
+CREATE TABLE IF NOT EXISTS eventos_simulacao (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    simulacao_id INTEGER NOT NULL,
+    sequencia INTEGER NOT NULL
+        CHECK (sequencia > 0),
+    instante TEXT NOT NULL,
+    tipo TEXT NOT NULL
+        CHECK (
+            tipo IN (
+                'simulacao_iniciada',
+                'pedido_na_fila',
+                'pedido_atribuido',
+                'pedido_nao_atribuido',
+                'pedido_entregue',
+                'viagem_concluida',
+                'viagem_cancelada',
+                'pedido_devolvido_a_fila',
+                'viagem_iniciada',
+                'pedido_em_rota',
+                'simulacao_concluida'
+            )
+        ),
+    pedido_codigo TEXT,
+    entregador_codigo TEXT,
+    viagem_numero INTEGER,
+    atraso_min REAL,
+    distancia_m INTEGER,
+    detalhe TEXT NOT NULL DEFAULT '',
+
+    FOREIGN KEY (simulacao_id)
+        REFERENCES simulacoes(id)
+        ON DELETE CASCADE,
+
+    UNIQUE (simulacao_id, sequencia)
+);
+
+CREATE INDEX IF NOT EXISTS idx_eventos_simulacao_pedido
+    ON eventos_simulacao (simulacao_id, pedido_codigo);
+
+CREATE INDEX IF NOT EXISTS idx_eventos_simulacao_entregador
+    ON eventos_simulacao (simulacao_id, entregador_codigo);
+
+CREATE TABLE IF NOT EXISTS mudancas_status_pedido (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    simulacao_id INTEGER NOT NULL,
+    evento_id INTEGER NOT NULL UNIQUE,
+    pedido_codigo TEXT NOT NULL,
+    instante TEXT NOT NULL,
+    status_anterior TEXT
+        CHECK (
+            status_anterior IN (
+                'pendente',
+                'na_fila',
+                'atribuido',
+                'em_rota',
+                'entregue'
+            )
+        ),
+    status_novo TEXT NOT NULL
+        CHECK (
+            status_novo IN (
+                'pendente',
+                'na_fila',
+                'atribuido',
+                'em_rota',
+                'entregue'
+            )
+        ),
+
+    FOREIGN KEY (simulacao_id)
+        REFERENCES simulacoes(id)
+        ON DELETE CASCADE,
+
+    FOREIGN KEY (evento_id)
+        REFERENCES eventos_simulacao(id)
+        ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_mudancas_status_pedido
+    ON mudancas_status_pedido (simulacao_id, pedido_codigo);
