@@ -89,7 +89,9 @@ class Simulacao:
     No inicio, os pedidos criados ate o instante inicial entram na
     fila de prioridade e a distribuicao planeja todas as viagens uma
     unica vez. A simulacao apenas executa esse plano: pedidos criados
-    depois do inicio entram na fila, mas nao sao atribuidos.
+    depois do inicio entram na fila, mas nao sao atribuidos. Pedidos
+    criados depois do fim do expediente pertencem a outro dia e ficam
+    fora da simulacao.
 
     O expediente vai das 09h as 17h. Um caminhao pode iniciar uma
     viagem ate as 17h, mesmo que retorne depois. Viagens que sairiam
@@ -113,7 +115,6 @@ class Simulacao:
         if len(set(codigos)) != len(codigos):
             raise ValueError("Os codigos dos pedidos devem ser unicos.")
 
-        self._pedidos = list(pedidos)
         self._distribuidor = distribuidor
         self._disponibilidade = disponibilidade
         self._observadores = list(observadores)
@@ -124,8 +125,14 @@ class Simulacao:
             second=0,
             microsecond=0,
         )
+        self._pedidos = [
+            p for p in pedidos if p.criado_em <= self._fim_expediente
+        ]
+        self._fora_do_dia = len(pedidos) - len(self._pedidos)
 
-        self._status = {p.codigo: StatusPedido.PENDENTE for p in pedidos}
+        self._status = {
+            p.codigo: StatusPedido.PENDENTE for p in self._pedidos
+        }
         self._historico: list[EventoSimulacao] = []
         self._agenda: list[tuple] = []
         self._desempate = count()
@@ -278,17 +285,20 @@ class Simulacao:
         inicio = self.agora
         plano = self._plano
         posicao = {p.codigo: i for i, p in enumerate(self._ordem_fila, 1)}
+        detalhe = (
+            f"{len(disponiveis)} pedidos na fila, "
+            f"{len(self._distribuidor.entregadores)} entregadores, "
+            f"centro {self._distribuidor.centro.nome}"
+        )
+
+        if self._fora_do_dia:
+            detalhe += (
+                f"; {self._fora_do_dia} pedidos criados depois do fim "
+                "do expediente ficaram fora"
+            )
 
         self._agendar(
-            _evento(
-                inicio,
-                TipoEvento.SIMULACAO_INICIADA,
-                detalhe=(
-                    f"{len(disponiveis)} pedidos na fila, "
-                    f"{len(self._distribuidor.entregadores)} entregadores, "
-                    f"centro {self._distribuidor.centro.nome}"
-                ),
-            )
+            _evento(inicio, TipoEvento.SIMULACAO_INICIADA, detalhe=detalhe)
         )
 
         for pedido in self._ordem_fila:
@@ -457,7 +467,8 @@ class Simulacao:
             )
             self._encerrada = True
 
-        if instante > self.agora:
+        # Depois de concluida, o relogio para no instante da conclusao.
+        if instante > self.agora and not self._encerrada:
             self._relogio.avancar_para(instante)
 
         return processados
@@ -469,6 +480,9 @@ class Simulacao:
         Se um observador falhar (por exemplo, a auditoria nao gravar),
         o estado da simulacao nao muda e o evento continua na agenda,
         para que uma nova tentativa nao deixe lacunas no historico.
+        Na nova tentativa, o mesmo evento (mesma sequencia) e enviado
+        de novo a todos os observadores, inclusive aos que ja o tinham
+        recebido; por isso, os observadores devem ignorar repeticoes.
         """
 
         anterior = (

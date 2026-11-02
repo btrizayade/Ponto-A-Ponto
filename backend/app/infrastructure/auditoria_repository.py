@@ -71,11 +71,27 @@ class AuditoriaSimulacao:
         self.registrar(evento)
 
     def registrar(self, evento: EventoSimulacao) -> None:
-        """Grava um evento emitido pela simulacao."""
+        """
+        Grava um evento emitido pela simulacao.
+
+        Um evento ja gravado (mesma sequencia) e ignorado: a simulacao
+        reenvia o evento quando outro observador falha.
+        """
 
         instante = _formatar_instante(evento.instante)
 
         with conectar() as conexao:
+            ja_gravado = conexao.execute(
+                """
+                SELECT 1 FROM eventos_simulacao
+                WHERE simulacao_id = ? AND sequencia = ?
+                """,
+                (self.simulacao_id, evento.sequencia),
+            ).fetchone()
+
+            if ja_gravado:
+                return
+
             cursor = conexao.execute(
                 """
                 INSERT INTO eventos_simulacao (

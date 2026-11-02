@@ -162,6 +162,39 @@ def test_execucao_em_andamento_ate_o_ultimo_evento(banco_temporario):
     )
 
 
+def test_evento_reenviado_nao_e_gravado_duas_vezes(banco_temporario):
+    """Outro observador falha depois de a auditoria gravar o evento."""
+
+    falhas = {"restantes": 1}
+
+    def observador_instavel(evento):
+        if evento.sequencia == 3 and falhas["restantes"]:
+            falhas["restantes"] -= 1
+            raise RuntimeError("falha em outro observador")
+
+    entregadores = [Entregador("CAM-01")]
+    auditoria = AuditoriaSimulacao.criar(INICIO, CENTRO, entregadores, "Teste")
+    distribuidor = DistribuidorPedidos(
+        ServicoRoteamentoSimulado(fator_transito=1.0), CENTRO, entregadores
+    )
+    simulacao = Simulacao(
+        [criar_pedido("P1", BARRA), criar_pedido("P2", PITUBA)],
+        distribuidor,
+        INICIO,
+        observadores=[auditoria, observador_instavel],
+    )
+
+    with pytest.raises(RuntimeError):
+        simulacao.executar_ate_o_fim()
+
+    simulacao.executar_ate_o_fim()
+
+    assert listar_eventos(auditoria.simulacao_id) == simulacao.historico
+    assert obter_status_dos_pedidos(
+        auditoria.simulacao_id
+    ) == simulacao.status_dos_pedidos()
+
+
 def test_simulacoes_do_mesmo_cenario_ficam_separadas(simulacao_auditada):
     _, primeira = simulacao_auditada
     auditoria = AuditoriaSimulacao.criar(

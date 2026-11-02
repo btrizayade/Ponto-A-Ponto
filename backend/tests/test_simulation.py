@@ -219,6 +219,30 @@ def test_avancar_sem_iniciar_inclui_os_eventos_do_inicio():
     assert eventos[0].tipo == T.SIMULACAO_INICIADA
 
 
+def test_relogio_para_na_conclusao():
+    simulacao = criar_simulacao()
+
+    eventos = simulacao.avancar(600)
+    conclusao = eventos[-1]
+
+    assert conclusao.tipo == T.SIMULACAO_CONCLUIDA
+    assert conclusao.instante < INICIO + timedelta(minutes=600)
+    assert simulacao.agora == conclusao.instante
+
+    assert simulacao.avancar(120) == []
+    assert simulacao.agora == conclusao.instante
+
+
+def test_relogio_avanca_sem_eventos_durante_a_simulacao():
+    simulacao = criar_simulacao()
+    simulacao.iniciar()
+
+    eventos = simulacao.avancar(1)
+
+    assert eventos == []
+    assert simulacao.agora == INICIO + timedelta(minutes=1)
+
+
 def test_relogio_nao_volta():
     simulacao = criar_simulacao()
     simulacao.avancar(30)
@@ -329,6 +353,35 @@ def test_pedido_criado_depois_do_inicio_entra_na_fila_fora_do_plano():
     assert tipos(eventos) == [T.PEDIDO_NA_FILA]
     assert eventos[0].instante == tardio.criado_em
     assert simulacao.status_do_pedido("TARDIO") == S.NA_FILA
+
+
+@pytest.mark.parametrize(
+    "criado_em",
+    [
+        INICIO.replace(hour=17, minute=1),
+        INICIO + timedelta(days=10),
+    ],
+)
+def test_pedido_criado_depois_do_expediente_fica_fora(criado_em):
+    outro_dia = criar_pedido(
+        "OUTRO-DIA",
+        BARRA,
+        criado_em=criado_em,
+        prazo=criado_em + timedelta(days=3),
+    )
+    simulacao = criar_simulacao([*PEDIDOS, outro_dia])
+    referencia = criar_simulacao()
+
+    simulacao.executar_ate_o_fim()
+    referencia.executar_ate_o_fim()
+
+    assert "1 pedidos criados depois" in simulacao.historico[0].detalhe
+    assert simulacao.agora == referencia.agora
+    assert all(
+        e.pedido_codigo != "OUTRO-DIA" for e in simulacao.historico
+    )
+    with pytest.raises(KeyError):
+        simulacao.status_do_pedido("OUTRO-DIA")
 
 
 def test_pedido_nao_atribuido_fica_na_fila():
