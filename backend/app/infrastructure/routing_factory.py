@@ -16,26 +16,37 @@ PROVEDOR_GOOGLE = "google"
 PROVEDOR_SIMULADO = "simulado"
 
 
-def criar_servico_roteamento(
-    provedor: str | None = None,
-) -> ServicoRoteamento:
+PROVEDORES = (PROVEDOR_GOOGLE, PROVEDOR_SIMULADO)
+
+
+def google_disponivel() -> bool:
+    """Indica se a chave da Google Routes API esta configurada."""
+
+    return bool(os.environ.get(VARIAVEL_CHAVE_API, "").strip())
+
+
+def provedor_padrao() -> str:
     """
-    Cria o servico de roteamento configurado no ambiente.
+    Provedor usado quando nenhum e informado.
 
     Sem configuracao explicita, usa a Google Routes API quando a
     chave estiver definida e o provedor simulado caso contrario.
     """
 
-    provedor = (provedor or os.environ.get(VARIAVEL_PROVEDOR) or "").strip()
+    provedor = os.environ.get(VARIAVEL_PROVEDOR, "").strip().lower()
 
-    if not provedor:
-        provedor = (
-            PROVEDOR_GOOGLE
-            if os.environ.get(VARIAVEL_CHAVE_API)
-            else PROVEDOR_SIMULADO
-        )
+    if provedor:
+        return provedor
 
-    provedor = provedor.lower()
+    return PROVEDOR_GOOGLE if google_disponivel() else PROVEDOR_SIMULADO
+
+
+def criar_servico_roteamento(
+    provedor: str | None = None,
+) -> ServicoRoteamento:
+    """Cria o servico de roteamento informado ou o padrao do ambiente."""
+
+    provedor = (provedor or "").strip().lower() or provedor_padrao()
 
     if provedor == PROVEDOR_GOOGLE:
         # Consultas repetidas saem do cache e nao consomem o limite diario.
