@@ -160,6 +160,42 @@ class AuditoriaSimulacao:
                 )
 
 
+_COLUNAS_SIMULACAO = """
+    id,
+    cenario_id,
+    criada_em,
+    inicio_simulado,
+    fim_simulado,
+    centro_nome,
+    estrategia,
+    entregadores,
+    status
+"""
+
+
+def listar_simulacoes() -> list[dict[str, Any]]:
+    """Execucoes gravadas, da mais recente para a mais antiga."""
+
+    with conectar() as conexao:
+        registros = conexao.execute(
+            f"SELECT {_COLUNAS_SIMULACAO} FROM simulacoes ORDER BY id DESC"
+        ).fetchall()
+
+    return [dict(registro) for registro in registros]
+
+
+def obter_simulacao(simulacao_id: int) -> dict[str, Any] | None:
+    """Dados gravados de uma execucao, se existir."""
+
+    with conectar() as conexao:
+        registro = conexao.execute(
+            f"SELECT {_COLUNAS_SIMULACAO} FROM simulacoes WHERE id = ?",
+            (simulacao_id,),
+        ).fetchone()
+
+    return dict(registro) if registro else None
+
+
 def listar_eventos(simulacao_id: int) -> list[EventoSimulacao]:
     """Recupera os eventos gravados de uma simulacao, em ordem."""
 

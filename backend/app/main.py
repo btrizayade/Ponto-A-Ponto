@@ -1,6 +1,11 @@
 import app.config  # noqa: F401  Carrega o backend/.env.
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+
+from app.api import cenarios, simulacoes
+from app.domain.routing import ErroRoteamento
+from app.infrastructure.controle_uso_api import LimiteUsoExcedido
 
 app = FastAPI(
     title="Simulador de Filas de Prioridade",
@@ -23,3 +28,22 @@ def health_check():
         "status": "ok",
         "service": "simulador-filas-prioridade",
     }
+
+
+app.include_router(cenarios.router)
+app.include_router(simulacoes.router)
+
+
+@app.exception_handler(LimiteUsoExcedido)
+def limite_uso_excedido(_: Request, erro: LimiteUsoExcedido):
+    return JSONResponse(status_code=429, content={"detail": str(erro)})
+
+
+@app.exception_handler(ErroRoteamento)
+def erro_roteamento(_: Request, erro: ErroRoteamento):
+    """Falha do provedor de mapas: a simulacao nao muda de estado."""
+
+    return JSONResponse(
+        status_code=502,
+        content={"detail": f"Falha no servico de mapas: {erro}"},
+    )

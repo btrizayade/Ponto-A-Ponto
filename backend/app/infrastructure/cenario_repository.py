@@ -56,6 +56,30 @@ def listar_cenarios() -> list[Cenario]:
     ]
 
 
+def obter_cenario(cenario_id: int) -> Cenario | None:
+    """Retorna o cenario com o ID informado, se existir."""
+
+    with conectar() as conexao:
+        registro = conexao.execute(
+            """
+            SELECT id, codigo, nome, descricao
+            FROM cenarios
+            WHERE id = ?
+            """,
+            (cenario_id,),
+        ).fetchone()
+
+    if registro is None:
+        return None
+
+    return Cenario(
+        id=registro["id"],
+        codigo=registro["codigo"],
+        nome=registro["nome"],
+        descricao=registro["descricao"],
+    )
+
+
 def obter_ou_criar_cenario(cenario: Cenario) -> Cenario:
     """Retorna um cenario existente ou cadastra um novo."""
 

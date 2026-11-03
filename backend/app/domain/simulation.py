@@ -159,6 +159,16 @@ class Simulacao:
         return self._plano
 
     @property
+    def pedidos(self) -> list[Pedido]:
+        """Pedidos que fazem parte da simulacao."""
+
+        return list(self._pedidos)
+
+    @property
+    def distribuidor(self) -> DistribuidorPedidos:
+        return self._distribuidor
+
+    @property
     def ordem_fila(self) -> list[Pedido]:
         """Pedidos na ordem de prioridade usada no planejamento."""
 
@@ -209,14 +219,17 @@ class Simulacao:
         for pedido in disponiveis:
             fila.adicionar_pedido(pedido, agora=inicio)
 
-        self._ordem_fila = [
+        ordem_fila = [
             fila.retirar_proximo() for _ in range(len(disponiveis))
         ]
+        # Se o planejamento falhar (servico de mapas), nada muda e
+        # a simulacao pode ser iniciada de novo.
         self._plano = self._distribuidor.planejar(
-            self._ordem_fila,
+            ordem_fila,
             inicio,
             self._disponibilidade,
         )
+        self._ordem_fila = ordem_fila
 
         self._agendar_inicio(disponiveis, futuros)
         self._agendar_viagens()
