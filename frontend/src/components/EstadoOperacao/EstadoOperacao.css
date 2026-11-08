@@ -1,0 +1,116 @@
+
+.estado-operacao {
+  background-color: var(--cor-branco);
+  border: 1px solid var(--cor-borda);
+  border-radius: 12px;
+  padding: 24px;
+  margin-top: 25px;
+  margin-bottom: 25px;
+}
+
+/* Cabeçalho da seção */
+.estado-cabecalho {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 22px;
+}
+
+.estado-cabecalho h2 {
+  color: var(--cor-primaria);
+  font-size: 19px;
+  margin-bottom: 5px;
+}
+
+.estado-cabecalho p {
+  color: var(--cor-texto-secundario);
+  font-size: 13px;
+}
+
+/* Quantidade de entregadores */
+.estado-total {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 13px;
+  background-color: #E8EFF7;
+  color: var(--cor-primaria);
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+/* Lista de entregadores */
+.lista-entregadores {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 15px;
+}
+
+/* Card individual */
+.card-entregador {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  padding: 18px;
+  border: 1px solid var(--cor-borda);
+  border-radius: 10px;
+  transition: background-color 0.2s ease,
+              box-shadow 0.2s ease;
+}
+
+.card-entregador:hover {
+  background-color: #F8FAFC;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
+}
+
+/* Identificação */
+.entregador-identificacao {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.entregador-icone {
+  width: 42px;
+  height: 42px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background-color: #FFF0E6;
+  color: var(--cor-secundaria);
+  border-radius: 10px;
+}
+
+.entregador-identificacao div:last-child {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.entregador-identificacao strong {
+  color: var(--cor-primaria);
+  font-size: 14px;
+}
+
+.entregador-identificacao span {
+  color: var(--cor-texto-secundario);
+  font-size: 12px;
+}
+
+/* Informações das viagens e paradas */
+.entregador-dados {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  padding-top: 14px;
+  border-top: 1px solid var(--cor-borda);
+}
+
+.entregador-dados div {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--cor-texto-secundario);
+  font-size: 13px;
+}

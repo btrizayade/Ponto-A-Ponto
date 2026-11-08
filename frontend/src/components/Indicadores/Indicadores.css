@@ -1,0 +1,76 @@
+.indicadores {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 18px;
+  margin-top: 30px;
+  margin-bottom: 25px;
+  
+}
+
+.card-indicador {
+  background-color: var(--cor-branco);
+  border: 1px solid var(--cor-borda);
+  border-radius: 12px;
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.card-indicador:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 5px 15px rgba(0, 0, 0, 0.06);
+}
+
+.indicador-cabecalho {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.indicador-cabecalho span {
+  color: var(--cor-texto-secundario);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.indicador-icone {
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.indicador-icone.laranja {
+  color: var(--cor-secundaria);
+  background-color: #FFF0E6;
+}
+
+.indicador-icone.azul {
+  color: var(--cor-primaria);
+  background-color: #E8EFF7;
+}
+
+.indicador-icone.verde {
+  color: var(--cor-sucesso);
+  background-color: #E5F7EF;
+}
+
+.indicador-icone.amarelo {
+  color: var(--cor-atencao);
+  background-color: #FFF6DF;
+}
+
+.card-indicador > strong {
+  color: var(--cor-primaria);
+  font-size: 28px;
+  font-weight: 700;
+}
+
+.card-indicador > p {
+  color: var(--cor-texto-secundario);
+  font-size: 12px;
+}
