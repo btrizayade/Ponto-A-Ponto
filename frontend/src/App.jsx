@@ -1,3 +1,4 @@
+import { useState, useEffect, useCallback } from 'react'
 
 import Sidebar from './components/Sidebar/Sidebar'
 import Header from './components/Header/Header'
@@ -6,16 +7,43 @@ import Indicadores from './components/Indicadores/Indicadores'
 import FilaPedidos from './components/FilaPedidos/FilaPedidos'
 import EstadoOperacao from './components/EstadoOperacao/EstadoOperacao'
 
-import { useState, useEffect } from 'react'
 import { buscarSimulacao } from './services/api'
 
 import './App.css'
 
 function App() {
+  const [paginaAtiva, setPaginaAtiva] = useState('Simulação')
+
   const [cenarioSelecionado, setCenarioSelecionado] = useState('')
   const [pedidos, setPedidos] = useState([])
   const [simulacao, setSimulacao] = useState(null)
   const [idSimulacao, setIdSimulacao] = useState(null)
+
+  // Navega até a seção selecionada com rolagem suave
+  function navegarParaSecao(nomeSecao) {
+    setPaginaAtiva(nomeSecao)
+
+    const secoes = {
+      'Simulação': 'secao-simulacao',
+      'Pedidos': 'secao-pedidos',
+      'Entregadores': 'secao-entregadores'
+    }
+
+    const elemento = document.getElementById(secoes[nomeSecao])
+
+    elemento?.scrollIntoView({
+      behavior: 'smooth',
+      block: 'start'
+    })
+  }
+
+  // Limpa os dados da simulação anterior ao trocar de cenário
+  const trocarCenario = useCallback((novoCenario) => {
+  setCenarioSelecionado(novoCenario)
+  setIdSimulacao(null)
+  setSimulacao(null)
+  setPedidos([])
+}, [])
 
   // Busca os dados da simulação quando o ID é atualizado
   useEffect(() => {
@@ -59,9 +87,14 @@ function App() {
 
   return (
     <div className="app">
-      <Sidebar />
+
+      <Sidebar
+        paginaAtiva={paginaAtiva}
+        aoNavegar={navegarParaSecao}
+      />
 
       <main className="conteudo-principal">
+
         <Header
           tempoSimulacao={tempoSimulacao}
           status={simulacao?.concluida
@@ -71,26 +104,33 @@ function App() {
               : 'Aguardando'}
         />
 
-        <ControleSimulacao
-          cenarioSelecionado={cenarioSelecionado}
-          setCenarioSelecionado={setCenarioSelecionado}
-          setIdSimulacao={setIdSimulacao}
-          setSimulacao={setSimulacao}
-          idSimulacao={idSimulacao}
-        />
+        <div id="secao-simulacao" className="secao-dashboard">
+          <ControleSimulacao
+            cenarioSelecionado={cenarioSelecionado}
+            aoTrocarCenario={trocarCenario}
+            setIdSimulacao={setIdSimulacao}
+            setSimulacao={setSimulacao}
+            idSimulacao={idSimulacao}
+          />
 
-        <Indicadores
-          pedidos={pedidos}
-          simulacao={simulacao}
-        />
+          <Indicadores
+            pedidos={pedidos}
+            simulacao={simulacao}
+          />
+        </div>
 
-        <FilaPedidos
-          cenarioSelecionado={cenarioSelecionado}
-          setPedidosCompartilhados={setPedidos}
-          simulacao={simulacao}
-        />
+        <div id="secao-pedidos" className="secao-dashboard">
+          <FilaPedidos
+            cenarioSelecionado={cenarioSelecionado}
+            setPedidosCompartilhados={setPedidos}
+            simulacao={simulacao}
+          />
+        </div>
 
-        <EstadoOperacao simulacao={simulacao} />
+        <div id="secao-entregadores" className="secao-dashboard">
+          <EstadoOperacao simulacao={simulacao} />
+        </div>
+
       </main>
     </div>
   )

@@ -17,20 +17,26 @@ function FilaPedidos({
   setPedidosCompartilhados,
   simulacao
 }) {
-  // Estados
   const [pedidos, setPedidos] = useState([])
   const [carregando, setCarregando] = useState(false)
   const [erro, setErro] = useState('')
 
+  // Verifica se a simulação já foi iniciada
+  const simulacaoIniciada = Boolean(simulacao?.iniciada)
+
   // Usa os pedidos atualizados da simulação quando ela estiver iniciada
-  const pedidosExibidos = simulacao?.iniciada
+  const pedidosExibidos = simulacaoIniciada
     ? simulacao.pedidos || []
     : pedidos
 
-    // Organiza os pedidos pela posição na fila
-const pedidosOrdenados = [...pedidosExibidos].sort((a, b) => {
-   return (a.posicao_fila ?? Infinity) - (b.posicao_fila ?? Infinity)
-  })
+  // Organiza pela posição somente durante a simulação
+  const pedidosOrdenados = simulacaoIniciada
+    ? [...pedidosExibidos].sort(
+        (a, b) =>
+          (a.posicao_fila ?? Infinity) -
+          (b.posicao_fila ?? Infinity)
+      )
+    : pedidosExibidos
 
   // Busca os pedidos sempre que o cenário selecionado mudar
   useEffect(() => {
@@ -49,7 +55,6 @@ const pedidosOrdenados = [...pedidosExibidos].sort((a, b) => {
 
         setPedidos(dados)
         setPedidosCompartilhados(dados)
-
       } catch (erro) {
         setErro(erro.message)
         setPedidos([])
@@ -72,7 +77,7 @@ const pedidosOrdenados = [...pedidosExibidos].sort((a, b) => {
       entregue: 'Entregue'
     }
 
-    return statusMapeados[status] || 'Não informado'
+    return statusMapeados[status] || 'Aguardando simulação'
   }
 
   return (
@@ -80,8 +85,17 @@ const pedidosOrdenados = [...pedidosExibidos].sort((a, b) => {
 
       <div className="fila-cabecalho">
         <div>
-          <h2>Fila de Pedidos</h2>
-          <p>Pedidos cadastrados no cenário</p>
+          <h2>
+            {simulacaoIniciada
+              ? 'Fila priorizada'
+              : 'Pedidos cadastrados'}
+          </h2>
+
+          <p>
+            {simulacaoIniciada
+              ? 'Pedidos organizados pela prioridade de atendimento'
+              : 'Pedidos registrados no cenário, aguardando a simulação'}
+          </p>
         </div>
 
         <div className="fila-total">
@@ -110,7 +124,7 @@ const pedidosOrdenados = [...pedidosExibidos].sort((a, b) => {
             <div className="pedido-identificacao">
               <strong>{pedido.codigo}</strong>
 
-              <span className={`pedido-status status-${pedido.status}`}>
+              <span className={`pedido-status status-${pedido.status || 'pendente'}`}>
                 {obterTextoStatus(pedido.status)}
               </span>
             </div>
@@ -120,19 +134,23 @@ const pedidosOrdenados = [...pedidosExibidos].sort((a, b) => {
               <span>{pedido.bairro}</span>
             </div>
 
-            <div className="pedido-prioridade">
-              <Award size={16} />
-              <span>
-                Pontuação: <strong>{pedido.prioridade ?? '—'}</strong>
-              </span>
-            </div>
+            {simulacaoIniciada && (
+              <>
+                <div className="pedido-prioridade">
+                  <Award size={16} />
+                  <span>
+                    Pontuação: <strong>{pedido.prioridade ?? '—'}</strong>
+                  </span>
+                </div>
 
-            <div className="pedido-posicao">
-              <ListOrdered size={16} />
-              <span>
-                Posição: <strong>{pedido.posicao_fila ?? '—'}</strong>
-              </span>
-            </div>
+                <div className="pedido-posicao">
+                  <ListOrdered size={16} />
+                  <span>
+                    Posição: <strong>{pedido.posicao_fila ?? '—'}</strong>
+                  </span>
+                </div>
+              </>
+            )}
 
             <div className="pedido-entregador">
               <span className="pedido-entregador-label">Entregador:</span>

@@ -18,11 +18,21 @@ import './ControleSimulacao.css'
 
 function ControleSimulacao({
   cenarioSelecionado,
-  setCenarioSelecionado,
+  aoTrocarCenario,
   setIdSimulacao,
   setSimulacao,
   idSimulacao
 }) {
+  
+    // Obtém a data e o horário atuais para iniciar a simulação
+  // Obtém a data e o horário atuais
+function obterInicioSimulacao() {
+  return new Date().toISOString()
+}
+
+  
+
+
   const [cenarios, setCenarios] = useState([])
   const [carregando, setCarregando] = useState(true)
   const [erro, setErro] = useState('')
@@ -43,7 +53,7 @@ function ControleSimulacao({
         setCenarios(dados)
 
         if (dados.length > 0) {
-          setCenarioSelecionado(String(dados[0].id))
+          aoTrocarCenario(String(dados[0].id))
         }
       } catch (erro) {
         setErro(erro.message)
@@ -53,8 +63,9 @@ function ControleSimulacao({
     }
 
     carregarCenarios()
-  }, [])
+  }, [aoTrocarCenario])
 
+  
   // Cria uma nova simulação
   async function iniciarSimulacao() {
     try {
@@ -63,7 +74,7 @@ function ControleSimulacao({
 
       const dados = await criarSimulacao({
         cenario_id: Number(cenarioSelecionado),
-        inicio: '2026-11-09T09:00:00',
+        inicio: obterInicioSimulacao(),
         quantidade_entregadores: Number(quantidadeEntregadores),
         estrategia: 'insercao_mais_barata',
         provedor: 'simulado'
@@ -103,7 +114,7 @@ function ControleSimulacao({
     }
   }
 
-  // Reinicia a simulação criando uma nova
+  // Cria uma nova execução da simulação
   async function reiniciarSimulacao() {
     try {
       setReiniciando(true)
@@ -111,7 +122,7 @@ function ControleSimulacao({
 
       const dados = await criarSimulacao({
         cenario_id: Number(cenarioSelecionado),
-        inicio: '2026-11-09T09:00:00',
+        inicio: obterInicioSimulacao(),
         quantidade_entregadores: Number(quantidadeEntregadores),
         estrategia: 'insercao_mais_barata',
         provedor: 'simulado'
@@ -148,8 +159,12 @@ function ControleSimulacao({
         <select
           id="cenario"
           value={cenarioSelecionado}
-          onChange={(evento) => setCenarioSelecionado(evento.target.value)}
-          disabled={carregando || !!erro || criando || reiniciando}
+          onChange={(evento) => {
+            aoTrocarCenario(evento.target.value)
+            setPausada(false)
+            setErro('')
+          }}
+          disabled={carregando || !!erro && !cenarioSelecionado || criando || reiniciando || avancando}
         >
           {carregando && (
             <option value="">Carregando cenários...</option>
@@ -244,7 +259,7 @@ function ControleSimulacao({
           }
         >
           <RotateCcw size={18} />
-          {reiniciando ? 'Reiniciando...' : 'Reiniciar'}
+          {reiniciando ? 'Criando nova...' : 'Nova simulação'}
         </button>
 
       </div>

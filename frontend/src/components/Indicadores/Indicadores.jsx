@@ -13,8 +13,7 @@ function Indicadores({ pedidos = [], simulacao = null }) {
   const entregadores = simulacao?.entregadores || []
   const totalPedidos = dadosIndicadores?.total_pedidos ?? pedidos.length
   const entregues = dadosIndicadores?.entregues ?? 0
-  const pendentes = totalPedidos - entregues
-
+  const naoEntregues = totalPedidos - entregues
 
   const indicadores = [
     {
@@ -40,7 +39,7 @@ function Indicadores({ pedidos = [], simulacao = null }) {
     },
     {
       titulo: 'Não entregues',
-      valor: pendentes,
+      valor: naoEntregues,
       descricao: 'Pedidos ainda em andamento',
       icone: Clock,
       cor: 'amarelo'

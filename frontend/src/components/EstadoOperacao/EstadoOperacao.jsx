@@ -30,16 +30,13 @@ function EstadoOperacao({ simulacao = null }) {
       <div className="lista-entregadores">
 
         {entregadores.map((entregador) => {
-          
-
 
           // Conta apenas os pedidos que ainda não foram entregues
-        const paradas = pedidos.filter(
-          (pedido) =>
-            pedido.entregador_codigo === entregador.codigo &&
-            pedido.status !== 'entregue'
-        ).length
-
+          const paradasRestantes = pedidos.filter(
+            (pedido) =>
+              pedido.entregador_codigo === entregador.codigo &&
+              pedido.status !== 'entregue'
+          ).length
 
           return (
             <div
@@ -73,7 +70,7 @@ function EstadoOperacao({ simulacao = null }) {
 
                 <div>
                   <MapPin size={17} />
-                  <span>{paradas} paradas</span>
+                  <span>{paradasRestantes} paradas restantes</span>
                 </div>
 
               </div>
