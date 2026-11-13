@@ -114,3 +114,19 @@
   color: var(--cor-texto-secundario);
   font-size: 13px;
 }
+
+.lista-viagens {
+  display: grid;
+  gap: 7px;
+  margin: -8px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.lista-viagens li {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  color: var(--cor-texto-secundario);
+  font-size: 12px;
+}

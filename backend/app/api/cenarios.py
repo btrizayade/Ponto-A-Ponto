@@ -11,6 +11,7 @@ from app.api.schemas import (
 )
 from app.api.simulacoes import ESTRATEGIA_PADRAO, ESTRATEGIAS
 from app.domain.sla import HORA_FIM, HORA_INICIO
+from app.domain.models import CategoriaProduto, ModalidadeEntrega
 from app.infrastructure.cenario_repository import listar_cenarios, obter_cenario
 from app.infrastructure.distribution_config import (
     criar_entregadores_padrao,
@@ -42,6 +43,8 @@ def obter_configuracao():
         ],
         estrategia_padrao=ESTRATEGIA_PADRAO,
         estrategias=list(ESTRATEGIAS),
+        categorias_produto=list(CategoriaProduto),
+        modalidades_entrega=list(ModalidadeEntrega),
         quantidade_entregadores_padrao=len(criar_entregadores_padrao()),
         max_entregadores=MAX_ENTREGADORES,
         centro=centro_resposta(obter_centro_distribuicao()),

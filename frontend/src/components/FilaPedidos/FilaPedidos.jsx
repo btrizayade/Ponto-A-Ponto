@@ -10,12 +10,54 @@ import {
 } from 'lucide-react'
 
 import { buscarPedidos } from '../../services/api'
+import { combinarPedidosDaSimulacao } from './pedidosVisiveis'
+import {
+  formatarInicioSelecionado,
+  obterTemposPedido
+} from './pedidoTemporal'
 import './FilaPedidos.css'
+
+function TemposPedido({ pedido, simulacaoAtiva }) {
+  const tempos = obterTemposPedido(pedido)
+
+  return (
+    <div className="pedido-tempos">
+      <div>
+        <Clock size={15} />
+        <span>Pedido criado: <strong>{tempos.criadoEm || 'Não informado'}</strong></span>
+      </div>
+      <div>
+        <Clock size={15} />
+        <span>Prazo SLA: <strong>{tempos.prazoSla || 'Não informado'}</strong></span>
+      </div>
+      {simulacaoAtiva && (
+        <>
+          <div>
+            <Clock size={15} />
+            <span>Previsão do plano: <strong>{tempos.previsaoEntrega || 'Aguardando planejamento'}</strong></span>
+          </div>
+          <div>
+            <Clock size={15} />
+            <span>Entrega na simulação: <strong>{tempos.entregueEm || 'Ainda não entregue'}</strong></span>
+          </div>
+          <div>
+            <Clock size={15} />
+            <span>Última atualização: <strong>{tempos.atualizadoEm || 'Sem evento registrado'}</strong></span>
+          </div>
+        </>
+      )}
+    </div>
+  )
+}
 
 function FilaPedidos({
   cenarioSelecionado,
   setPedidosCompartilhados,
-  simulacao
+  simulacao,
+  revisaoLista = 0,
+  cenarioExibicao,
+  nomeCenarioExibicao = '',
+  inicioSimuladoSelecionado = null
 }) {
   const [pedidos, setPedidos] = useState([])
   const [carregando, setCarregando] = useState(false)
@@ -23,25 +65,41 @@ function FilaPedidos({
 
   // Verifica se a simulação já foi iniciada
   const simulacaoIniciada = Boolean(simulacao?.iniciada)
+  const simulacaoConcluida = simulacao?.estado_execucao === 'concluida'
+  const cenarioPedidos = cenarioExibicao || cenarioSelecionado
+  const simulacaoDaLista = simulacaoIniciada &&
+    simulacao?.cenario_id === Number(cenarioPedidos)
 
   // Usa os pedidos atualizados da simulação quando ela estiver iniciada
-  const pedidosExibidos = simulacaoIniciada
-    ? simulacao.pedidos || []
-    : pedidos
+  const pedidosDaSimulacao = simulacao?.pedidos || []
+  const simulacaoDoCenario = simulacao?.cenario_id === Number(cenarioPedidos)
+  const pedidosExibidos = simulacaoDoCenario && simulacaoConcluida
+    ? pedidos
+    : simulacaoDoCenario
+    ? combinarPedidosDaSimulacao(pedidosDaSimulacao, pedidos)
+    : simulacaoDaLista
+      ? pedidosDaSimulacao
+      : pedidos
 
   // Organiza pela posição somente durante a simulação
-  const pedidosOrdenados = simulacaoIniciada
+  const pedidosOrdenados = simulacaoDaLista
     ? [...pedidosExibidos].sort(
         (a, b) =>
           (a.posicao_fila ?? Infinity) -
           (b.posicao_fila ?? Infinity)
       )
     : pedidosExibidos
+  const inicioSelecionadoTexto = formatarInicioSelecionado(
+    inicioSimuladoSelecionado
+  )
+  const inicioSimulacaoTexto = simulacao?.cenario_id === Number(cenarioPedidos)
+    ? obterTemposPedido({ criado_em: simulacao.inicio }).criadoEm
+    : null
 
   // Busca os pedidos sempre que o cenário selecionado mudar
   useEffect(() => {
     async function carregarPedidos() {
-      if (!cenarioSelecionado) {
+      if (!cenarioPedidos) {
         setPedidos([])
         setPedidosCompartilhados([])
         return
@@ -51,7 +109,7 @@ function FilaPedidos({
         setCarregando(true)
         setErro('')
 
-        const dados = await buscarPedidos(cenarioSelecionado)
+        const dados = await buscarPedidos(cenarioPedidos)
 
         setPedidos(dados)
         setPedidosCompartilhados(dados)
@@ -65,7 +123,7 @@ function FilaPedidos({
     }
 
     carregarPedidos()
-  }, [cenarioSelecionado, setPedidosCompartilhados])
+  }, [cenarioPedidos, revisaoLista, simulacao?.estado_execucao, setPedidosCompartilhados])
 
   // Traduz o status do pedido para exibição
   function obterTextoStatus(status) {
@@ -74,7 +132,8 @@ function FilaPedidos({
       na_fila: 'Na fila',
       atribuido: 'Atribuído',
       em_rota: 'Em rota',
-      entregue: 'Entregue'
+      entregue: 'Entregue',
+      proxima_simulacao: 'Próxima simulação'
     }
 
     return statusMapeados[status] || 'Aguardando simulação'
@@ -86,16 +145,27 @@ function FilaPedidos({
       <div className="fila-cabecalho">
         <div>
           <h2>
-            {simulacaoIniciada
+            {simulacaoDaLista
               ? 'Fila priorizada'
               : 'Pedidos cadastrados'}
           </h2>
 
           <p>
-            {simulacaoIniciada
+            {nomeCenarioExibicao && `Cenário: ${nomeCenarioExibicao}. `}
+            {simulacaoDaLista
               ? 'Pedidos organizados pela prioridade de atendimento'
               : 'Pedidos registrados no cenário, aguardando a simulação'}
           </p>
+          {inicioSelecionadoTexto && (
+            <p className="fila-inicio-simulado">
+              Início operacional selecionado: <strong>{inicioSelecionadoTexto}</strong>
+            </p>
+          )}
+          {simulacaoDaLista && inicioSimulacaoTexto && (
+            <p className="fila-inicio-simulado">
+              Previsões exibidas para o início da simulação atual: <strong>{inicioSimulacaoTexto}</strong>
+            </p>
+          )}
         </div>
 
         <div className="fila-total">
@@ -119,7 +189,10 @@ function FilaPedidos({
         )}
 
         {!carregando && !erro && pedidosOrdenados.map((pedido) => (
-          <div className="pedido-item" key={pedido.codigo}>
+          <div
+            className={`pedido-item${pedido.atualizado_em ? ' pedido-com-atualizacao' : ''}`}
+            key={`${pedido.codigo}-${pedido.status || 'pendente'}-${pedido.atualizado_em || ''}`}
+          >
 
             <div className="pedido-identificacao">
               <strong>{pedido.codigo}</strong>
@@ -159,14 +232,10 @@ function FilaPedidos({
               </strong>
             </div>
 
-            <div className="pedido-prazo">
-              <Clock size={16} />
-              <span>
-                {pedido.prazo_entrega_em
-                  ? new Date(pedido.prazo_entrega_em).toLocaleString('pt-BR')
-                  : 'Prazo não informado'}
-              </span>
-            </div>
+            <TemposPedido
+              pedido={pedido}
+              simulacaoAtiva={simulacaoDaLista}
+            />
 
           </div>
         ))}

@@ -15,6 +15,8 @@ from app.domain.models import Entregador, Pedido, StatusPedido
 from app.domain.priority_queue import FilaPrioridadeHeap
 from app.domain.sla import FUSO_HORARIO, HORA_FIM, HORA_INICIO
 
+SEGUNDOS_REAIS_POR_HORA_SIMULADA = 15.0
+
 
 class TipoEvento(str, Enum):
     """Acontecimentos registrados durante a simulacao."""
@@ -30,6 +32,16 @@ class TipoEvento(str, Enum):
     VIAGEM_INICIADA = "viagem_iniciada"
     PEDIDO_EM_ROTA = "pedido_em_rota"
     SIMULACAO_CONCLUIDA = "simulacao_concluida"
+
+
+class EstadoExecucao(str, Enum):
+    """Estado operacional controlado pela API para uma simulacao ativa."""
+
+    AGUARDANDO = "aguardando"
+    EXECUTANDO = "executando"
+    PAUSADA = "pausada"
+    CONCLUIDA = "concluida"
+    FALHOU = "falhou"
 
 
 # Ordem de processamento de eventos no mesmo instante: o caminhao
@@ -86,12 +98,10 @@ class Simulacao:
     """
     Executa um plano de distribuicao em etapas, com relogio simulado.
 
-    No inicio, os pedidos criados ate o instante inicial entram na
-    fila de prioridade e a distribuicao planeja todas as viagens uma
-    unica vez. A simulacao apenas executa esse plano: pedidos criados
-    depois do inicio entram na fila, mas nao sao atribuidos. Pedidos
-    criados depois do fim do expediente pertencem a outro dia e ficam
-    fora da simulacao.
+    Os pedidos recebidos formam o snapshot do cenario e entram juntos
+    na fila inicial, independentemente de suas datas historicas de
+    criacao. Essas datas e os prazos originais nao sao reescritos. O
+    inicio escolhido define o relogio e o expediente da operacao.
 
     O expediente vai das 09h as 17h. Um caminhao pode iniciar uma
     viagem ate as 17h, mesmo que retorne depois. Viagens que sairiam
@@ -125,10 +135,7 @@ class Simulacao:
             second=0,
             microsecond=0,
         )
-        self._pedidos = [
-            p for p in pedidos if p.criado_em <= self._fim_expediente
-        ]
-        self._fora_do_dia = len(pedidos) - len(self._pedidos)
+        self._pedidos = list(pedidos)
 
         self._status = {
             p.codigo: StatusPedido.PENDENTE for p in self._pedidos
@@ -212,15 +219,15 @@ class Simulacao:
             raise RuntimeError("A simulacao ja foi iniciada.")
 
         inicio = self.agora
-        disponiveis = [p for p in self._pedidos if p.criado_em <= inicio]
-        futuros = [p for p in self._pedidos if p.criado_em > inicio]
+        pedidos_do_snapshot = self._pedidos
 
         fila = FilaPrioridadeHeap()
-        for pedido in disponiveis:
+        for pedido in pedidos_do_snapshot:
             fila.adicionar_pedido(pedido, agora=inicio)
 
         ordem_fila = [
-            fila.retirar_proximo() for _ in range(len(disponiveis))
+            fila.retirar_proximo()
+            for _ in range(len(pedidos_do_snapshot))
         ]
         # Se o planejamento falhar (servico de mapas), nada muda e
         # a simulacao pode ser iniciada de novo.
@@ -231,7 +238,7 @@ class Simulacao:
         )
         self._ordem_fila = ordem_fila
 
-        self._agendar_inicio(disponiveis, futuros)
+        self._agendar_inicio(pedidos_do_snapshot)
         self._agendar_viagens()
 
         return self._processar_ate(inicio)
@@ -267,6 +274,28 @@ class Simulacao:
 
         return self.avancar_ate(self.agora + timedelta(minutes=minutos))
 
+    def avancar_tempo_real(
+        self,
+        segundos_reais: float,
+        segundos_reais_por_hora_simulada: float = SEGUNDOS_REAIS_POR_HORA_SIMULADA,
+    ) -> list[EventoSimulacao]:
+        """Converte tempo monotônico real em avanço contínuo do relógio."""
+
+        if segundos_reais < 0:
+            raise ValueError("O tempo real decorrido nao pode ser negativo.")
+        if segundos_reais_por_hora_simulada <= 0:
+            raise ValueError(
+                "A velocidade da simulacao deve ser maior que zero."
+            )
+
+        eventos = [] if self.iniciada else self.iniciar()
+        if self._encerrada:
+            return eventos
+
+        horas_simuladas = segundos_reais / segundos_reais_por_hora_simulada
+        alvo = self.agora + timedelta(hours=horas_simuladas)
+        return eventos + self._processar_ate(alvo)
+
     def executar_ate_o_fim(self) -> list[EventoSimulacao]:
         """Processa todos os eventos restantes."""
 
@@ -292,23 +321,16 @@ class Simulacao:
 
     def _agendar_inicio(
         self,
-        disponiveis: Sequence[Pedido],
-        futuros: Sequence[Pedido],
+        pedidos: Sequence[Pedido],
     ) -> None:
         inicio = self.agora
         plano = self._plano
         posicao = {p.codigo: i for i, p in enumerate(self._ordem_fila, 1)}
         detalhe = (
-            f"{len(disponiveis)} pedidos na fila, "
+            f"{len(pedidos)} pedidos na fila, "
             f"{len(self._distribuidor.entregadores)} entregadores, "
             f"centro {self._distribuidor.centro.nome}"
         )
-
-        if self._fora_do_dia:
-            detalhe += (
-                f"; {self._fora_do_dia} pedidos criados depois do fim "
-                "do expediente ficaram fora"
-            )
 
         self._agendar(
             _evento(inicio, TipoEvento.SIMULACAO_INICIADA, detalhe=detalhe)
@@ -322,17 +344,6 @@ class Simulacao:
                     pedido=pedido,
                     status_novo=StatusPedido.NA_FILA,
                     detalhe=f"posicao {posicao[pedido.codigo]} na fila",
-                )
-            )
-
-        for pedido in futuros:
-            self._agendar(
-                _evento(
-                    pedido.criado_em,
-                    TipoEvento.PEDIDO_NA_FILA,
-                    pedido=pedido,
-                    status_novo=StatusPedido.NA_FILA,
-                    detalhe="criado depois do inicio; fora do plano",
                 )
             )
 

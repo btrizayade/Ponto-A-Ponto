@@ -71,6 +71,12 @@ CREATE TABLE IF NOT EXISTS pedidos (
             )
         ),
 
+    origem TEXT NOT NULL DEFAULT 'manual'
+        CHECK (origem IN ('referencia', 'manual')),
+
+    ativo INTEGER NOT NULL DEFAULT 1
+        CHECK (ativo IN (0, 1)),
+
     FOREIGN KEY (cenario_id)
         REFERENCES cenarios(id)
         ON DELETE CASCADE,
@@ -132,6 +138,9 @@ CREATE TABLE IF NOT EXISTS simulacoes (
     centro_nome TEXT NOT NULL,
     estrategia TEXT NOT NULL,
     entregadores TEXT NOT NULL,
+    segundos_reais_por_hora_simulada INTEGER NOT NULL DEFAULT 15
+        CHECK (segundos_reais_por_hora_simulada IN (5, 15, 30, 60)),
+    limite_pedido_manual_id INTEGER,
     status TEXT NOT NULL DEFAULT 'em_andamento'
         CHECK (status IN ('em_andamento', 'concluida')),
 
