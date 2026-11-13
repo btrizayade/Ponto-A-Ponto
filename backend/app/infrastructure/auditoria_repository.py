@@ -39,6 +39,8 @@ class AuditoriaSimulacao:
         entregadores: Sequence[Entregador],
         estrategia: str,
         cenario_id: int | None = None,
+        limite_pedido_manual_id: int | None = None,
+        segundos_reais_por_hora_simulada: int = 15,
     ) -> "AuditoriaSimulacao":
         """Cadastra uma nova execucao da simulacao."""
 
@@ -51,9 +53,11 @@ class AuditoriaSimulacao:
                     inicio_simulado,
                     centro_nome,
                     estrategia,
-                    entregadores
+                    entregadores,
+                    limite_pedido_manual_id,
+                    segundos_reais_por_hora_simulada
                 )
-                VALUES (?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     cenario_id,
@@ -62,6 +66,8 @@ class AuditoriaSimulacao:
                     centro.nome,
                     estrategia,
                     ",".join(e.codigo for e in entregadores),
+                    limite_pedido_manual_id,
+                    segundos_reais_por_hora_simulada,
                 ),
             )
 
@@ -158,6 +164,23 @@ class AuditoriaSimulacao:
                     """,
                     (instante, self.simulacao_id),
                 )
+                conexao.execute(
+                    """
+                    UPDATE pedidos
+                    SET ativo = 0
+                    WHERE cenario_id = (
+                        SELECT cenario_id FROM simulacoes WHERE id = ?
+                    )
+                      AND origem = 'manual'
+                      AND ativo = 1
+                      AND id <= COALESCE(
+                          (SELECT limite_pedido_manual_id
+                           FROM simulacoes WHERE id = ?),
+                          -1
+                      )
+                    """,
+                    (self.simulacao_id, self.simulacao_id),
+                )
 
 
 _COLUNAS_SIMULACAO = """
@@ -169,6 +192,7 @@ _COLUNAS_SIMULACAO = """
     centro_nome,
     estrategia,
     entregadores,
+    segundos_reais_por_hora_simulada,
     status
 """
 

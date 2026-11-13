@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Request
 
 from app.api.estado import montar_estado, montar_rotas, resultado_etapa
 from app.api.registro import SimulacaoAtiva, registro
@@ -11,14 +11,17 @@ from app.api.schemas import (
     EventoResposta,
     NovaSimulacao,
     ResultadoEtapa,
+    RespostaControleExecucao,
     RotasSimulacao,
     SimulacaoGravada,
 )
 from app.domain.distribution import (
+    DistribuicaoEquidadeSLA,
     DistribuicaoInsercaoMaisBarata,
     DistribuicaoOrdemDaFila,
 )
 from app.domain.sla import FUSO_HORARIO
+from app.domain.simulation import EstadoExecucao
 from app.infrastructure.auditoria_repository import (
     CONSULTAS_AUDITORIA_DIR,
     executar_consulta_auditoria,
@@ -28,9 +31,14 @@ from app.infrastructure.auditoria_repository import (
 )
 from app.infrastructure.cenario_repository import obter_cenario
 from app.infrastructure.distribution_config import criar_entregadores_padrao
+from app.infrastructure.execucao_automatica import sincronizar_relogio
 from app.infrastructure.routing_factory import (
-    criar_servico_roteamento,
+    PROVEDOR_GOOGLE,
+    PROVEDOR_SIMULADO,
     provedor_padrao,
+)
+from app.infrastructure.simulated_routing import (
+    FATOR_TRANSITO_ALTA_DEMANDA,
 )
 from app.infrastructure.simulacao_factory import criar_simulacao_auditada
 
@@ -38,6 +46,7 @@ from app.infrastructure.simulacao_factory import criar_simulacao_auditada
 ESTRATEGIAS = {
     "insercao_mais_barata": DistribuicaoInsercaoMaisBarata,
     "ordem_da_fila": DistribuicaoOrdemDaFila,
+    "equidade_sla": DistribuicaoEquidadeSLA,
 }
 ESTRATEGIA_PADRAO = "insercao_mais_barata"
 
@@ -52,30 +61,63 @@ router = APIRouter(prefix="/api/simulacoes", tags=["simulacoes"])
 
 
 @router.post("", response_model=EstadoSimulacao, status_code=201)
-def criar(dados: NovaSimulacao):
+async def criar(dados: NovaSimulacao, request: Request):
     """
     Cria uma simulacao de um cenario, gravada na auditoria.
 
-    A simulacao comeca parada: a primeira etapa monta a fila e
-    planeja as viagens.
+    Esta chamada representa o início explícito de uma operação e agenda
+    a execução automática após registrar sua configuração.
     """
 
-    if obter_cenario(dados.cenario_id) is None:
+    if registro.existe_operacao_em_andamento():
+        raise HTTPException(
+            409,
+            "Já existe uma simulação executando ou pausada. "
+            "Conclua a operação atual antes de iniciar outra.",
+        )
+
+    cenario = obter_cenario(dados.cenario_id)
+
+    if cenario is None:
         raise HTTPException(404, f"Cenario {dados.cenario_id} nao encontrado.")
 
-    provedor = dados.provedor or provedor_padrao()
-    estrategia = dados.estrategia or ESTRATEGIA_PADRAO
+    fator_transito = None
+
+    if cenario.codigo == "ALTA_DEMANDA":
+        if dados.provedor == PROVEDOR_GOOGLE:
+            raise HTTPException(
+                400,
+                "O cenário ALTA_DEMANDA exige o provedor simulado com "
+                f"fator de trânsito {FATOR_TRANSITO_ALTA_DEMANDA:.1f}; "
+                "Google Routes é incompatível com essa configuração.",
+            )
+
+        provedor = PROVEDOR_SIMULADO
+        fator_transito = FATOR_TRANSITO_ALTA_DEMANDA
+    else:
+        provedor = dados.provedor or provedor_padrao()
+
+    if dados.estrategia is not None:
+        estrategia = dados.estrategia
+    elif cenario.codigo == "EQUIDADE":
+        estrategia = "equidade_sla"
+    else:
+        estrategia = ESTRATEGIA_PADRAO
     inicio = _com_fuso(dados.inicio)
 
     try:
         simulacao, auditoria = criar_simulacao_auditada(
             dados.cenario_id,
             inicio,
-            servico=criar_servico_roteamento(provedor),
             entregadores=criar_entregadores_padrao(
                 dados.quantidade_entregadores
             ),
             estrategia=ESTRATEGIAS[estrategia](),
+            provedor=provedor,
+            fator_transito=fator_transito,
+            segundos_reais_por_hora_simulada=(
+                dados.segundos_reais_por_hora_simulada
+            ),
         )
     except ValueError as erro:
         raise HTTPException(400, str(erro)) from erro
@@ -87,8 +129,12 @@ def criar(dados: NovaSimulacao):
         inicio=inicio,
         provedor=provedor,
         estrategia=estrategia,
+        segundos_reais_por_hora_simulada=(
+            dados.segundos_reais_por_hora_simulada
+        ),
     )
     registro.adicionar(ativa)
+    await request.app.state.execucao_automatica.iniciar(ativa.id, ativa)
 
     with ativa.trava:
         return montar_estado(ativa)
@@ -108,6 +154,8 @@ def obter_estado(simulacao_id: int):
     ativa = _ativa(simulacao_id)
 
     with ativa.trava:
+        sincronizar_relogio(ativa)
+        _atualizar_estado_execucao(ativa)
         return montar_estado(ativa)
 
 
@@ -121,7 +169,9 @@ def proxima_etapa(simulacao_id: int):
     ativa = _ativa(simulacao_id)
 
     with ativa.trava:
+        _exigir_nao_pausada(ativa)
         eventos = ativa.simulacao.proxima_etapa()
+        _atualizar_estado_execucao(ativa)
 
         return resultado_etapa(ativa, eventos)
 
@@ -133,6 +183,7 @@ def avancar(simulacao_id: int, avanco: Avanco):
     ativa = _ativa(simulacao_id)
 
     with ativa.trava:
+        _exigir_nao_pausada(ativa)
         try:
             if avanco.minutos is not None:
                 eventos = ativa.simulacao.avancar(avanco.minutos)
@@ -141,19 +192,111 @@ def avancar(simulacao_id: int, avanco: Avanco):
         except ValueError as erro:
             raise HTTPException(400, str(erro)) from erro
 
+        _atualizar_estado_execucao(ativa)
         return resultado_etapa(ativa, eventos)
 
 
 @router.post("/{simulacao_id}/executar", response_model=ResultadoEtapa)
 def executar(simulacao_id: int):
-    """Processa todos os eventos restantes."""
+    """Processa os eventos restantes, cedendo o controle entre etapas."""
+
+    ativa = _ativa(simulacao_id)
+    eventos_processados = []
+
+    while True:
+        with ativa.trava:
+            if ativa.estado_execucao == EstadoExecucao.FALHOU:
+                if not eventos_processados:
+                    raise HTTPException(
+                        409,
+                        "A simulação falhou e não pode avançar.",
+                    )
+
+                return resultado_etapa(ativa, eventos_processados)
+
+            if ativa.estado_execucao == EstadoExecucao.PAUSADA:
+                if not eventos_processados:
+                    raise HTTPException(
+                        409,
+                        "A simulação está pausada. Retome antes de executá-la.",
+                    )
+
+                return resultado_etapa(ativa, eventos_processados)
+
+            if ativa.simulacao.concluida:
+                _atualizar_estado_execucao(ativa)
+                return resultado_etapa(ativa, eventos_processados)
+
+            eventos_processados.extend(ativa.simulacao.proxima_etapa())
+            _atualizar_estado_execucao(ativa)
+
+            if ativa.simulacao.concluida:
+                return resultado_etapa(ativa, eventos_processados)
+
+
+@router.post(
+    "/{simulacao_id}/pausar",
+    response_model=RespostaControleExecucao,
+)
+def pausar(simulacao_id: int):
+    """Pausa a simulação sem permitir novas etapas."""
 
     ativa = _ativa(simulacao_id)
 
     with ativa.trava:
-        eventos = ativa.simulacao.executar_ate_o_fim()
+        if ativa.simulacao.concluida:
+            _atualizar_estado_execucao(ativa)
+            raise HTTPException(
+                409,
+                "Uma simulação concluída não pode ser pausada.",
+            )
+        if ativa.estado_execucao == EstadoExecucao.FALHOU:
+            raise HTTPException(409, "Uma simulação com falha não pode ser pausada.")
+        if ativa.estado_execucao == EstadoExecucao.PAUSADA:
+            raise HTTPException(409, "A simulação já está pausada.")
+        if ativa.estado_execucao == EstadoExecucao.AGUARDANDO:
+            raise HTTPException(
+                409,
+                "A simulação ainda não foi iniciada e não pode ser pausada.",
+            )
 
-        return resultado_etapa(ativa, eventos)
+        sincronizar_relogio(ativa)
+        if ativa.simulacao.concluida:
+            _atualizar_estado_execucao(ativa)
+            raise HTTPException(
+                409,
+                "Uma simulação concluída não pode ser pausada.",
+            )
+
+        ativa.estado_execucao = EstadoExecucao.PAUSADA
+        return _resposta_controle(ativa, "Simulação pausada.")
+
+
+@router.post(
+    "/{simulacao_id}/retomar",
+    response_model=RespostaControleExecucao,
+)
+def retomar(simulacao_id: int):
+    """Retoma uma simulação pausada no ponto em que parou."""
+
+    ativa = _ativa(simulacao_id)
+
+    with ativa.trava:
+        if ativa.simulacao.concluida:
+            _atualizar_estado_execucao(ativa)
+            raise HTTPException(
+                409,
+                "Uma simulação concluída não pode ser retomada.",
+            )
+        if ativa.estado_execucao != EstadoExecucao.PAUSADA:
+            raise HTTPException(
+                409,
+                "A simulação não está pausada e não pode ser retomada.",
+            )
+
+        ativa.marca_relogio_monotonic = ativa.relogio_monotonic()
+        ativa.estado_execucao = EstadoExecucao.EXECUTANDO
+        return _resposta_controle(ativa, "Simulação retomada.")
 
 
 # Mapa, eventos e auditoria
@@ -170,6 +313,8 @@ def obter_rotas(simulacao_id: int):
     ativa = _ativa(simulacao_id)
 
     with ativa.trava:
+        sincronizar_relogio(ativa)
+        _atualizar_estado_execucao(ativa)
         if not ativa.simulacao.iniciada:
             raise HTTPException(
                 409, "A simulacao ainda nao foi iniciada."
@@ -192,6 +337,12 @@ def obter_eventos(
     """Eventos gravados na auditoria; funciona para qualquer simulacao."""
 
     _gravada(simulacao_id)
+
+    ativa = registro.obter(simulacao_id)
+    if ativa is not None:
+        with ativa.trava:
+            sincronizar_relogio(ativa)
+            _atualizar_estado_execucao(ativa)
 
     return [
         EventoResposta.model_validate(evento)
@@ -228,6 +379,42 @@ def consultar_auditoria(
 
 
 # Auxiliares
+
+
+def _exigir_nao_pausada(ativa: SimulacaoAtiva) -> None:
+    if ativa.estado_execucao == EstadoExecucao.FALHOU:
+        raise HTTPException(
+            409,
+            "A simulação falhou e não pode avançar.",
+        )
+    if ativa.estado_execucao == EstadoExecucao.PAUSADA:
+        raise HTTPException(
+            409,
+            "A simulação está pausada. Retome antes de avançar.",
+        )
+
+
+def _atualizar_estado_execucao(ativa: SimulacaoAtiva) -> None:
+    if ativa.simulacao.concluida:
+        ativa.estado_execucao = EstadoExecucao.CONCLUIDA
+    elif (
+        ativa.simulacao.iniciada
+        and ativa.estado_execucao
+        not in {EstadoExecucao.PAUSADA, EstadoExecucao.FALHOU}
+    ):
+        ativa.estado_execucao = EstadoExecucao.EXECUTANDO
+
+
+def _resposta_controle(
+    ativa: SimulacaoAtiva,
+    mensagem: str,
+) -> RespostaControleExecucao:
+    return RespostaControleExecucao(
+        id=ativa.id,
+        estado_execucao=ativa.estado_execucao,
+        mensagem=mensagem,
+        simulacao=montar_estado(ativa),
+    )
 
 
 def _com_fuso(instante: datetime) -> datetime:

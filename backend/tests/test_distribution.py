@@ -5,6 +5,7 @@ import pytest
 
 from app.domain.distribution import (
     CentroDistribuicao,
+    DistribuicaoEquidadeSLA,
     DistribuicaoInsercaoMaisBarata,
     DistribuicaoOrdemDaFila,
     DistribuidorPedidos,
@@ -132,7 +133,11 @@ def test_centro_sem_nome_e_rejeitado():
 
 @pytest.mark.parametrize(
     "estrategia",
-    [DistribuicaoInsercaoMaisBarata, DistribuicaoOrdemDaFila],
+    [
+        DistribuicaoInsercaoMaisBarata,
+        DistribuicaoOrdemDaFila,
+        DistribuicaoEquidadeSLA,
+    ],
 )
 def test_todos_os_pedidos_sao_atribuidos_uma_vez(estrategia):
     plano = criar_distribuidor(estrategia=estrategia()).planejar(
@@ -510,7 +515,11 @@ class ServicoSemRotaParaItapua(ServicoRoteamentoSimulado):
 
 @pytest.mark.parametrize(
     "estrategia",
-    [DistribuicaoInsercaoMaisBarata, DistribuicaoOrdemDaFila],
+    [
+        DistribuicaoInsercaoMaisBarata,
+        DistribuicaoOrdemDaFila,
+        DistribuicaoEquidadeSLA,
+    ],
 )
 def test_pedido_sem_rota_fica_sem_atribuicao(estrategia):
     plano = criar_distribuidor(

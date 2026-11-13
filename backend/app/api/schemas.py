@@ -3,12 +3,17 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from app.domain.models import CategoriaProduto, StatusPedido
-from app.domain.simulation import TipoEvento
+from app.domain.models import CategoriaProduto, ModalidadeEntrega, StatusPedido
+from app.domain.simulation import EstadoExecucao, TipoEvento
 
 
 Provedor = Literal["simulado", "google"]
-Estrategia = Literal["insercao_mais_barata", "ordem_da_fila"]
+VelocidadeSimulacao = Literal[5, 15, 30, 60]
+Estrategia = Literal[
+    "insercao_mais_barata",
+    "ordem_da_fila",
+    "equidade_sla",
+]
 SituacaoViagem = Literal["planejada", "em_andamento", "concluida", "cancelada"]
 SituacaoEntregador = Literal["no_centro", "em_viagem"]
 
@@ -24,6 +29,11 @@ class Ponto(BaseModel):
 
 
 class Centro(Ponto):
+    nome: str
+
+
+class BairroResposta(Ponto):
+    id: int
     nome: str
 
 
@@ -44,6 +54,8 @@ class Configuracao(BaseModel):
     provedores: list[ProvedorDisponivel]
     estrategia_padrao: Estrategia
     estrategias: list[Estrategia]
+    categorias_produto: list[CategoriaProduto]
+    modalidades_entrega: list[ModalidadeEntrega]
     quantidade_entregadores_padrao: int
     max_entregadores: int
     centro: Centro
@@ -74,6 +86,22 @@ class PedidoResposta(BaseModel):
     tempo_servico_min: int
 
 
+class NovoPedido(BaseModel):
+    """Campos escolhidos pelo usuario para cadastrar um pedido."""
+
+    cenario_id: int = Field(gt=0)
+    bairro_id: int = Field(gt=0)
+    categoria_produto: CategoriaProduto
+    modalidade: ModalidadeEntrega
+
+
+class PedidoCriado(PedidoResposta):
+    """Pedido persistido, com identificador e prioridade inicial."""
+
+    id: int
+    prioridade_inicial: int
+
+
 # Criacao e controle
 
 
@@ -92,6 +120,7 @@ class NovaSimulacao(BaseModel):
     )
     estrategia: Estrategia | None = None
     provedor: Provedor | None = None
+    segundos_reais_por_hora_simulada: VelocidadeSimulacao = 15
 
 
 class Avanco(BaseModel):
@@ -139,6 +168,10 @@ class PedidoSimulacao(PedidoResposta):
     viagem_numero: int | None
     previsao_entrega_em: datetime | None
     entregue_em: datetime | None
+    atualizado_em: datetime | None = Field(
+        default=None,
+        description="Instante do evento mais recente registrado para o pedido.",
+    )
     atraso_min: float | None
     observacao: str = Field(description="Detalhe do ultimo evento do pedido.")
 
@@ -157,6 +190,46 @@ class EntregadorSimulacao(BaseModel):
     distancia_percorrida_m: int
 
 
+class IndicadoresBairro(BaseModel):
+    bairro: str
+    total_pedidos: int
+    entregues: int
+    entregues_com_sla_valido: int
+    entregues_no_prazo: int
+    entregues_atrasados: int
+    pendentes: int
+    pendentes_vencidos: int
+    em_andamento: int
+    em_risco_sla: int
+    tempo_medio_entrega_min: float | None
+    atraso_medio_min: float | None = Field(
+        description="Media do atraso real entre as entregas atrasadas."
+    )
+    percentual_cumprimento_sla: float | None
+    taxa_atraso: float | None
+    atraso_medio_normalizado_sla: float | None = Field(
+        description=(
+            "Media do atraso real dividido pela duracao do SLA, incluindo "
+            "zero para entregas no prazo."
+        )
+    )
+
+
+class IndicadoresEquidadeTerritorial(BaseModel):
+    melhor_bairro: str | None
+    atraso_normalizado_melhor_bairro: float | None
+    pior_bairro: str | None
+    atraso_normalizado_pior_bairro: float | None
+    diferenca_melhor_pior: float | None
+    indice_equidade_territorial_real: float | None = Field(
+        description=(
+            "Indice da F09.3 calculado sobre atrasos reais de entregas "
+            "concluidas, sem usar previsoes."
+        )
+    )
+    bairros_com_amostras_validas: int
+
+
 class Indicadores(BaseModel):
     total_pedidos: int
     por_status: dict[StatusPedido, int]
@@ -173,6 +246,8 @@ class Indicadores(BaseModel):
     viagens_canceladas: int
     distancia_planejada_m: int
     distancia_percorrida_m: int
+    por_bairro: list[IndicadoresBairro]
+    equidade_territorial: IndicadoresEquidadeTerritorial
 
 
 class EstadoSimulacao(BaseModel):
@@ -180,6 +255,9 @@ class EstadoSimulacao(BaseModel):
     cenario_id: int
     provedor: str
     estrategia: Estrategia
+    segundos_reais_por_hora_simulada: VelocidadeSimulacao = 15
+    estado_execucao: EstadoExecucao
+    erro_execucao: str | None = None
     inicio: datetime
     agora: datetime
     proximo_instante: datetime | None
@@ -193,6 +271,13 @@ class EstadoSimulacao(BaseModel):
     )
     pedidos: list[PedidoSimulacao]
     entregadores: list[EntregadorSimulacao]
+
+
+class RespostaControleExecucao(BaseModel):
+    id: int
+    estado_execucao: EstadoExecucao
+    mensagem: str
+    simulacao: EstadoSimulacao
 
 
 class ResultadoEtapa(BaseModel):
@@ -212,6 +297,7 @@ class SimulacaoGravada(BaseModel):
     fim_simulado: datetime | None
     centro_nome: str
     estrategia: str
+    segundos_reais_por_hora_simulada: VelocidadeSimulacao = 15
     entregadores: list[str]
     status: Literal["em_andamento", "concluida"]
     ativa: bool = Field(

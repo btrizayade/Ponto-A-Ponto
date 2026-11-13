@@ -8,10 +8,14 @@ from app.domain.models import Bairro, CategoriaProduto, Entregador, Pedido
 from app.domain.models import StatusPedido as S
 from app.domain.routing import Coordenada
 from app.domain.simulation import (
+    EstadoExecucao,
     RelogioSimulado,
     Simulacao,
     TipoEvento as T,
 )
+from app.api.registro import SimulacaoAtiva
+from app.infrastructure.auditoria_repository import AuditoriaSimulacao
+from app.infrastructure.execucao_automatica import sincronizar_relogio
 from app.infrastructure.simulated_routing import ServicoRoteamentoSimulado
 
 
@@ -243,6 +247,126 @@ def test_relogio_avanca_sem_eventos_durante_a_simulacao():
     assert simulacao.agora == INICIO + timedelta(minutes=1)
 
 
+@pytest.mark.parametrize("velocidade", [5, 15, 30, 60])
+def test_velocidade_selecionada_converte_segundos_em_hora_simulada(
+    monkeypatch, velocidade
+):
+    simulacao = criar_simulacao()
+    simulacao.iniciar()
+    alvos = []
+
+    def capturar_alvo(alvo):
+        alvos.append(alvo)
+        simulacao._relogio.avancar_para(alvo)
+        return []
+
+    monkeypatch.setattr(
+        simulacao,
+        "_processar_ate",
+        capturar_alvo,
+    )
+
+    simulacao.avancar_tempo_real(velocidade, velocidade)
+    assert alvos[-1] == INICIO + timedelta(hours=1)
+
+
+@pytest.mark.parametrize("velocidade", [5, 15, 30, 60])
+def test_pausa_congela_o_relogio_e_retomada_preserva_a_velocidade(
+    monkeypatch, velocidade
+):
+    simulacao = criar_simulacao()
+    monkeypatch.setattr(
+        simulacao,
+        "_processar_ate",
+        lambda instante: simulacao._relogio.avancar_para(instante) or [],
+    )
+    ativa = SimulacaoAtiva(
+        simulacao=simulacao,
+        auditoria=AuditoriaSimulacao(999),
+        cenario_id=1,
+        inicio=INICIO,
+        provedor="simulado",
+        estrategia="insercao_mais_barata",
+        estado_execucao=EstadoExecucao.EXECUTANDO,
+        segundos_reais_por_hora_simulada=velocidade,
+    )
+
+    class RelogioControlado:
+        agora = 100.0
+
+        def __call__(self):
+            return self.agora
+
+    relogio = RelogioControlado()
+    ativa.relogio_monotonic = relogio
+    ativa.marca_relogio_monotonic = relogio.agora
+    simulacao.iniciar()
+
+    relogio.agora += velocidade / 2
+    sincronizar_relogio(ativa)
+    meio = simulacao.agora
+
+    ativa.estado_execucao = EstadoExecucao.PAUSADA
+    relogio.agora += velocidade * 3
+    sincronizar_relogio(ativa)
+    assert simulacao.agora == meio
+
+    ativa.marca_relogio_monotonic = relogio.agora
+    ativa.estado_execucao = EstadoExecucao.EXECUTANDO
+    relogio.agora += velocidade / 2
+    sincronizar_relogio(ativa)
+
+    assert ativa.segundos_reais_por_hora_simulada == velocidade
+    assert simulacao.agora == INICIO + timedelta(hours=1)
+
+
+@pytest.mark.parametrize("velocidade", [5, 15, 30, 60])
+def test_evento_de_entrega_ocorre_no_instante_planejado(velocidade):
+    simulacao = criar_simulacao()
+    simulacao.iniciar()
+    parada = min(
+        simulacao.plano.paradas,
+        key=lambda item: item.saida_em,
+    )
+    segundos_reais = (
+        parada.saida_em - simulacao.agora
+    ).total_seconds() / 3600 * velocidade
+
+    eventos = simulacao.avancar_tempo_real(
+        segundos_reais + 0.00001, velocidade
+    )
+
+    entrega = next(
+        evento
+        for evento in eventos
+        if evento.tipo == T.PEDIDO_ENTREGUE
+        and evento.pedido_codigo == parada.pedido.codigo
+    )
+    assert entrega.instante == parada.saida_em
+    assert simulacao.status_do_pedido(parada.pedido.codigo) == S.ENTREGUE
+
+
+def test_avanco_acelerado_processa_eventos_simultaneos_sem_perdas():
+    simulacao = criar_simulacao(
+        PEDIDOS[:2],
+        entregadores=[Entregador("CAM-01", max_paradas_por_viagem=1)],
+    )
+    referencia = criar_simulacao(
+        PEDIDOS[:2],
+        entregadores=[Entregador("CAM-01", max_paradas_por_viagem=1)],
+    )
+    simulacao.iniciar()
+    referencia.executar_ate_o_fim()
+    fim = simulacao.plano.termino_em
+    velocidade = 15
+    segundos_reais = (fim - simulacao.agora).total_seconds() / 3600 * velocidade
+
+    simulacao.avancar_tempo_real(segundos_reais + velocidade, velocidade)
+
+    assert simulacao.concluida
+    assert simulacao.historico == referencia.historico
+
+
 def test_relogio_nao_volta():
     simulacao = criar_simulacao()
     simulacao.avancar(30)
@@ -338,21 +462,24 @@ def test_inicio_em_outro_fuso_usa_o_horario_de_salvador():
 # Casos especiais
 
 
-def test_pedido_criado_depois_do_inicio_entra_na_fila_fora_do_plano():
+def test_pedido_com_criacao_posterior_e_incluido_no_snapshot_do_plano():
     tardio = criar_pedido(
         "TARDIO", BARRA, criado_em=INICIO + timedelta(hours=1)
     )
     simulacao = criar_simulacao([*PEDIDOS, tardio])
 
-    simulacao.iniciar()
-    assert simulacao.status_do_pedido("TARDIO") == S.PENDENTE
-
     simulacao.executar_ate_o_fim()
     eventos = [e for e in simulacao.historico if e.pedido_codigo == "TARDIO"]
 
-    assert tipos(eventos) == [T.PEDIDO_NA_FILA]
-    assert eventos[0].instante == tardio.criado_em
-    assert simulacao.status_do_pedido("TARDIO") == S.NA_FILA
+    assert tipos(eventos) == [
+        T.PEDIDO_NA_FILA,
+        T.PEDIDO_ATRIBUIDO,
+        T.PEDIDO_EM_ROTA,
+        T.PEDIDO_ENTREGUE,
+    ]
+    assert eventos[0].instante == INICIO
+    assert simulacao.status_do_pedido("TARDIO") == S.ENTREGUE
+    assert tardio.criado_em == INICIO + timedelta(hours=1)
 
 
 @pytest.mark.parametrize(
@@ -362,7 +489,7 @@ def test_pedido_criado_depois_do_inicio_entra_na_fila_fora_do_plano():
         INICIO + timedelta(days=10),
     ],
 )
-def test_pedido_criado_depois_do_expediente_fica_fora(criado_em):
+def test_pedido_com_data_historica_futura_nao_some_do_snapshot(criado_em):
     outro_dia = criar_pedido(
         "OUTRO-DIA",
         BARRA,
@@ -370,18 +497,15 @@ def test_pedido_criado_depois_do_expediente_fica_fora(criado_em):
         prazo=criado_em + timedelta(days=3),
     )
     simulacao = criar_simulacao([*PEDIDOS, outro_dia])
-    referencia = criar_simulacao()
+    simulacao.iniciar()
 
-    simulacao.executar_ate_o_fim()
-    referencia.executar_ate_o_fim()
-
-    assert "1 pedidos criados depois" in simulacao.historico[0].detalhe
-    assert simulacao.agora == referencia.agora
-    assert all(
-        e.pedido_codigo != "OUTRO-DIA" for e in simulacao.historico
-    )
-    with pytest.raises(KeyError):
-        simulacao.status_do_pedido("OUTRO-DIA")
+    assert len(simulacao.pedidos) == len(PEDIDOS) + 1
+    assert simulacao.status_do_pedido("OUTRO-DIA") in {
+        S.ATRIBUIDO,
+        S.EM_ROTA,
+    }
+    assert simulacao.plano.rota_do_pedido("OUTRO-DIA")
+    assert outro_dia.criado_em == criado_em
 
 
 def test_pedido_nao_atribuido_fica_na_fila():

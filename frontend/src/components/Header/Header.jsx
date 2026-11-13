@@ -28,7 +28,7 @@ function Header({ tempoSimulacao = '00:00', status = 'Aguardando' }) {
           <Clock size={23} />
 
           <div>
-            <span>Tempo da Simulação</span>
+            <span>Duração simulada</span>
             <strong>{tempoSimulacao}</strong>
           </div>
         </div>

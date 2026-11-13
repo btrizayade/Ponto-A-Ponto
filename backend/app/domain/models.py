@@ -13,6 +13,21 @@ class CategoriaProduto(str, Enum):
     OUTRO = "outro"
 
 
+class ModalidadeEntrega(str, Enum):
+    """Opcoes mutuamente exclusivas do formulario de novo pedido."""
+
+    ENTREGA_RAPIDA = "entrega_rapida"
+    CLUBE = "clube"
+    CONVENCIONAL = "convencional"
+
+
+class OrigemPedido(str, Enum):
+    """Origem persistida do pedido no cadastro do cenário."""
+
+    REFERENCIA = "referencia"
+    MANUAL = "manual"
+
+
 class StatusPedido(str, Enum):
     """Estados possíveis de um pedido durante o atendimento."""
 
@@ -82,6 +97,8 @@ class Pedido:
     volume_l: float = 0.0
     tempo_servico_min: int = 5
     id: int | None = None
+    origem: OrigemPedido = OrigemPedido.MANUAL
+    ativo: bool = True
 
     def __post_init__(self) -> None:
         """Valida os dados essenciais do pedido."""

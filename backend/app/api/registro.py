@@ -1,8 +1,14 @@
 from dataclasses import dataclass, field
+from collections.abc import Callable
 from datetime import datetime
 from threading import Lock
+from time import monotonic
 
-from app.domain.simulation import Simulacao
+from app.domain.simulation import (
+    SEGUNDOS_REAIS_POR_HORA_SIMULADA,
+    EstadoExecucao,
+    Simulacao,
+)
 from app.infrastructure.auditoria_repository import AuditoriaSimulacao
 
 
@@ -21,7 +27,14 @@ class SimulacaoAtiva:
     inicio: datetime
     provedor: str
     estrategia: str
+    estado_execucao: EstadoExecucao = EstadoExecucao.AGUARDANDO
+    erro_execucao: str | None = None
     rotas_montadas: bool = False
+    marca_relogio_monotonic: float | None = None
+    segundos_reais_por_hora_simulada: int = int(
+        SEGUNDOS_REAIS_POR_HORA_SIMULADA
+    )
+    relogio_monotonic: Callable[[], float] = monotonic
     trava: Lock = field(default_factory=Lock, repr=False)
 
     @property
@@ -52,6 +65,17 @@ class RegistroSimulacoes:
     def ids(self) -> set[int]:
         with self._trava:
             return set(self._ativas)
+
+    def existe_operacao_em_andamento(self) -> bool:
+        """Indica se alguma execução precisa ser preservada em memória."""
+
+        with self._trava:
+            return any(
+                ativa.estado_execucao
+                in {EstadoExecucao.EXECUTANDO, EstadoExecucao.PAUSADA}
+                and not ativa.simulacao.concluida
+                for ativa in self._ativas.values()
+            )
 
     def limpar(self) -> None:
         with self._trava:
