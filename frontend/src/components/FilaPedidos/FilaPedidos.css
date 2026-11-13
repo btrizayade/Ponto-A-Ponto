@@ -1,0 +1,144 @@
+
+.fila-pedidos {
+  background-color: var(--cor-branco);
+  border: 1px solid var(--cor-borda);
+  border-radius: 12px;
+  padding: 24px;
+  margin-top: 25px;
+  margin-bottom: 25px;
+}
+
+/* Cabeçalho da seção */
+.fila-cabecalho {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 22px;
+}
+
+.fila-cabecalho h2 {
+  color: var(--cor-primaria);
+  font-size: 19px;
+  margin-bottom: 5px;
+}
+
+.fila-cabecalho p {
+  color: var(--cor-texto-secundario);
+  font-size: 13px;
+}
+
+.fila-total {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 13px;
+  background-color: #FFF0E6;
+  color: var(--cor-secundaria);
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+/* Lista de pedidos */
+.lista-pedidos {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+/* Cartão de cada pedido */
+.pedido-item {
+  display: grid;
+  grid-template-columns: 1.1fr 1fr 1fr 1fr 1.2fr 1.5fr;
+  align-items: center;
+  gap: 15px;
+  padding: 18px 16px;
+  border: 1px solid var(--cor-borda);
+  border-radius: 9px;
+  transition: background-color 0.2s ease;
+}
+
+.pedido-item:hover {
+  background-color: #F8FAFC;
+}
+
+/* Identificação do pedido */
+.pedido-identificacao {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.pedido-identificacao strong {
+  color: var(--cor-primaria);
+  font-size: 14px;
+}
+
+/* Status */
+.pedido-status {
+  padding: 5px 10px;
+  border-radius: 20px;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.status-pendente,
+.status-na_fila {
+  background-color: #FEF3C7;
+  color: #92400E;
+}
+
+.status-atribuido {
+  background-color: #DBEAFE;
+  color: #1E40AF;
+}
+
+.status-em_rota {
+  background-color: #E0E7FF;
+  color: #3730A3;
+}
+
+.status-entregue {
+  background-color: #D1FAE5;
+  color: #065F46;
+}
+
+/* Bairro e prazo */
+.pedido-informacao,
+.pedido-prazo {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--cor-texto-secundario);
+  font-size: 13px;
+}
+
+/* Pontuação e posição na fila */
+.pedido-prioridade,
+.pedido-posicao {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--cor-texto-secundario);
+  font-size: 13px;
+}
+
+.pedido-prioridade strong,
+.pedido-posicao strong {
+  color: var(--cor-primaria);
+}
+
+/* Entregador */
+.pedido-entregador {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: #26384A;
+}
+
+.pedido-entregador-label {
+  color: #64748B;
+}

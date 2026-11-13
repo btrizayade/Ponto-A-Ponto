@@ -1,0 +1,113 @@
+
+  .controles-simulacao {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  column-gap: 16px;
+  row-gap: 24px;
+  padding: 18px 20px;
+  background-color: var(--cor-branco);
+  border: 1px solid var(--cor-borda);
+  border-radius: 12px;
+  margin-bottom: 25px;
+}
+
+/* Seleção de cenário */
+
+.selecao-cenario {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.selecao-cenario label {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--cor-texto);
+}
+
+.selecao-cenario select {
+  min-width: 220px;
+  padding: 10px 12px;
+  border: 1px solid var(--cor-borda);
+  border-radius: 8px;
+  background-color: var(--cor-branco);
+  color: var(--cor-texto);
+  outline: none;
+  cursor: pointer;
+}
+
+.selecao-cenario select:focus {
+  border-color: var(--cor-secundaria);
+}
+
+/* Botões */
+
+.botoes-controle {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.botoes-controle button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 10px 15px;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  transition: all 0.2s ease;
+}
+
+/* Iniciar */
+
+.botao-iniciar {
+  background-color: var(--cor-secundaria);
+  color: var(--cor-branco);
+  border: 1px solid var(--cor-secundaria);
+}
+
+.botao-iniciar:hover {
+  background-color: #E85A08;
+}
+
+/* Pausar */
+
+.botao-pausar {
+  background-color: var(--cor-branco);
+  color: var(--cor-primaria);
+  border: 1px solid var(--cor-borda);
+}
+
+.botao-pausar:hover {
+  background-color: var(--cor-fundo);
+}
+
+/* Avançar */
+
+.botao-avancar {
+  background-color: var(--cor-primaria);
+  color: var(--cor-branco);
+  border: 1px solid var(--cor-primaria);
+}
+
+.botao-avancar:hover {
+  background-color: #1D4268;
+}
+
+/* Reiniciar */
+
+.botao-reiniciar {
+  background-color: var(--cor-branco);
+  color: var(--cor-texto-secundario);
+  border: 1px solid var(--cor-borda);
+}
+
+.botao-reiniciar:hover {
+  background-color: var(--cor-fundo);
+}
