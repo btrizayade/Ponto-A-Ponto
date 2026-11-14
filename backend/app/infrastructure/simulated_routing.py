@@ -88,6 +88,7 @@ class ServicoRoteamentoSimulado(ServicoRoteamento):
                 "O fator de transito nao pode ser menor que 1."
             )
 
+        self._velocidade_media_kmh = velocidade_media_kmh
         self._velocidade_m_s = velocidade_media_kmh * 1000 / 3600
         self._fator_transito = fator_transito
         self._relogio = relogio or (lambda: datetime.now(timezone.utc))
@@ -96,6 +97,33 @@ class ServicoRoteamentoSimulado(ServicoRoteamento):
     def perfil_consulta(self) -> str:
         fator = self._fator_transito or "horario"
         return f"simulado:{self._velocidade_m_s:.3f}:{fator}"
+
+    def parametros_auditoria(self) -> dict[str, object]:
+        """Configuracao efetiva do modelo, sem depender do ambiente depois."""
+
+        return {
+            "provedor": "simulado",
+            "classe": type(self).__name__,
+            "perfil": self.perfil_consulta,
+            "modelo": {
+                "raio_terra_m": RAIO_TERRA_M,
+                "fator_sinuosidade": FATOR_SINUOSIDADE,
+                "velocidade_media_kmh": self._velocidade_media_kmh,
+                "transito": {
+                    "modo": "fixo" if self._fator_transito is not None else "horario",
+                    "fator_fixo": self._fator_transito,
+                    "fatores_por_periodo": {
+                        "pico": FATOR_TRANSITO_PICO,
+                        "normal": FATOR_TRANSITO_NORMAL,
+                        "madrugada": FATOR_TRANSITO_MADRUGADA,
+                    },
+                    "horarios_pico": [list(horario) for horario in HORARIOS_PICO],
+                    "inicio_madrugada_hora": 6,
+                    "fim_madrugada_hora": 22,
+                    "fuso_horario": FUSO_HORARIO.key,
+                },
+            },
+        }
 
     def calcular_matriz(
         self,

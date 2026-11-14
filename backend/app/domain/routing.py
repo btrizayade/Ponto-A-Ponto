@@ -212,6 +212,17 @@ class ServicoRoteamento(ABC):
 
         return type(self).__name__
 
+    def parametros_auditoria(self) -> dict[str, object]:
+        """Descreve o perfil efetivo sem incluir credenciais do provedor."""
+
+        return {
+            "provedor": "desconhecido",
+            "classe": type(self).__name__,
+            # Provedores customizados podem codificar credenciais no perfil;
+            # por padrao persistimos somente o identificador da classe.
+            "perfil": type(self).__name__,
+        }
+
     def fechar(self) -> None:
         """Libera recursos do provedor, como clientes HTTP."""
 

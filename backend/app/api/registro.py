@@ -53,6 +53,48 @@ class RegistroSimulacoes:
     def __init__(self) -> None:
         self._ativas: dict[int, SimulacaoAtiva] = {}
         self._trava = Lock()
+        self._reserva_criacao: object | None = None
+
+    def reservar_criacao(self) -> object | None:
+        """Reserva atomicamente o início de uma operação.
+
+        A reserva é um token, não um lock mantido durante a criação ou a
+        execução. Ela continua válida enquanto o chamador prepara e agenda
+        o executor, impedindo outra requisição de atravessar esse intervalo.
+        """
+
+        with self._trava:
+            if self._reserva_criacao is not None or self._ha_operacao_ativa():
+                return None
+
+            reserva = object()
+            self._reserva_criacao = reserva
+            return reserva
+
+    def adicionar_reservada(
+        self,
+        reserva: object,
+        ativa: SimulacaoAtiva,
+    ) -> None:
+        """Registra a simulação somente para quem possui a reserva atual."""
+
+        with self._trava:
+            if self._reserva_criacao is not reserva:
+                raise RuntimeError("A reserva de criação não é mais válida.")
+            self._ativas[ativa.id] = ativa
+
+    def liberar_reserva(self, reserva: object) -> None:
+        """Libera a reserva, sem afetar uma reserva posterior."""
+
+        with self._trava:
+            if self._reserva_criacao is reserva:
+                self._reserva_criacao = None
+
+    def remover(self, simulacao_id: int) -> SimulacaoAtiva | None:
+        """Remove uma instância que não chegou a iniciar o executor."""
+
+        with self._trava:
+            return self._ativas.pop(simulacao_id, None)
 
     def adicionar(self, ativa: SimulacaoAtiva) -> None:
         with self._trava:
@@ -70,16 +112,23 @@ class RegistroSimulacoes:
         """Indica se alguma execução precisa ser preservada em memória."""
 
         with self._trava:
-            return any(
-                ativa.estado_execucao
-                in {EstadoExecucao.EXECUTANDO, EstadoExecucao.PAUSADA}
-                and not ativa.simulacao.concluida
-                for ativa in self._ativas.values()
+            return (
+                self._reserva_criacao is not None
+                or self._ha_operacao_ativa()
             )
+
+    def _ha_operacao_ativa(self) -> bool:
+        return any(
+            ativa.estado_execucao
+            in {EstadoExecucao.EXECUTANDO, EstadoExecucao.PAUSADA}
+            and not ativa.simulacao.concluida
+            for ativa in self._ativas.values()
+        )
 
     def limpar(self) -> None:
         with self._trava:
             self._ativas.clear()
+            self._reserva_criacao = None
 
 
 registro = RegistroSimulacoes()

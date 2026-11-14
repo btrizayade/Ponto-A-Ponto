@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -303,6 +303,17 @@ class SimulacaoGravada(BaseModel):
     ativa: bool = Field(
         description="Se esta em memoria e pode ser controlada pela API."
     )
+
+
+class ParametrosSimulacaoResposta(BaseModel):
+    """Parametros, entradas e consultas de roteamento persistidos."""
+
+    simulacao_id: int
+    disponivel: bool
+    parametros: dict[str, Any] | None
+    snapshot_pedidos: dict[str, Any] | None
+    consultas_roteamento: list[dict[str, Any]]
+    planejamento: dict[str, Any]
 
 
 # Rotas para o mapa

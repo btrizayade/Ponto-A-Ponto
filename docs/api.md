@@ -59,6 +59,7 @@ GET  /api/configuracao                    → valores padrão do formulário
 GET  /api/cenarios                        → escolher o cenário
 POST /api/simulacoes                      → criar e iniciar a execução automática
 GET  /api/simulacoes/{id}                 → acompanhar o estado atualizado
+GET  /api/simulacoes/{id}/parametros      → parâmetros, entradas e roteamentos persistidos
 POST /api/simulacoes/{id}/pausar          → pausar
 POST /api/simulacoes/{id}/retomar         → retomar
 GET  /api/simulacoes/{id}/rotas           → desenhar/atualizar o mapa
@@ -298,6 +299,126 @@ distribuição.
 #### `GET /api/simulacoes`
 
 Simulações gravadas, da mais recente para a mais antiga. `ativa` indica se ela ainda está em memória e pode ser controlada.
+
+#### `GET /api/simulacoes/{id}/parametros`
+
+Consulta a auditoria experimental persistida no SQLite. Continua disponível
+depois que o backend reinicia e não depende do estado em memória. A resposta
+contém parâmetros efetivos, snapshot versionado dos pedidos e bairros e as
+consultas de roteamento em ordem de uso. Cada consulta aponta para uma resposta
+normalizada versionada e deduplicada por hash; matrizes guardam os índices e
+valores entregues ao motor, e rotas guardam distâncias, durações, polyline e
+trechos. Resultados vindos do cache também são copiados para o registro da
+simulação. Chaves de API e outros segredos não são incluídos.
+
+Exemplo resumido de resposta:
+
+```json
+{
+  "simulacao_id": 81,
+  "disponivel": true,
+  "parametros": {
+    "versao": 1,
+    "cenario": { "id": 2, "codigo": "ALTA_DEMANDA", "nome": "Alta Demanda e Trânsito Intenso" },
+    "roteamento": {
+      "provedor": "simulado",
+      "modelo": { "transito": { "modo": "fixo", "fator_fixo": 2.0 } }
+    },
+    "distribuicao": {
+      "estrategia": "insercao_mais_barata",
+      "centro": { "nome": "Comercio", "latitude": -12.971, "longitude": -38.501 },
+      "entregadores": [
+        { "codigo": "CAM-01", "max_paradas_por_viagem": 6, "capacidade_peso_kg": 500.0, "capacidade_volume_l": 3000.0 }
+      ]
+    },
+    "relogio": { "segundos_reais_por_hora_simulada": 15 }
+  },
+  "snapshot_pedidos": {
+    "versao": 1,
+    "dados": {
+      "versao": 1,
+      "cenario": { "id": 2, "codigo": "ALTA_DEMANDA", "nome": "Alta Demanda e Trânsito Intenso", "descricao": "…" },
+      "pedidos": [
+        {
+          "id": 25,
+          "codigo": "ALTA-001",
+          "bairro": { "id": 1, "nome": "Comercio", "latitude": -12.963, "longitude": -38.507 },
+          "categoria_produto": "medicamento",
+          "cliente_clube": true,
+          "entrega_rapida": true,
+          "sla_dias_uteis": 1,
+          "criado_em": "2026-10-30T09:00:00-03:00",
+          "prazo_entrega_em": "2026-10-30T17:00:00-03:00",
+          "peso_kg": 1.2,
+          "volume_l": 2.0,
+          "tempo_servico_min": 7,
+          "status_inicial_motor": "pendente",
+          "origem": "referencia",
+          "ativo": true
+        }
+      ]
+    }
+  },
+  "planejamento": {
+    "estado": "concluido",
+    "integridade": "completa",
+    "consultas_esperadas": 1,
+    "consultas_registradas": 1,
+    "erro": null,
+    "problemas": []
+  },
+  "consultas_roteamento": [
+    {
+      "sequencia": 1,
+      "tipo": "matriz",
+      "provedor": "simulado",
+      "perfil": "simulado:8.333:2.0",
+      "origem_resultado": "provedor",
+      "partida_em": "2026-10-30T10:00:00-03:00",
+      "consultada_em": "2026-11-13T12:00:00+00:00",
+      "requisicao": { "origens": [{ "latitude": -12.971, "longitude": -38.501 }], "destinos": [{ "latitude": -12.963, "longitude": -38.507 }], "partida_em": "2026-10-30T10:00:00-03:00" },
+      "resposta": {
+        "versao": 1,
+        "hash_sha256": "…",
+        "dados": {
+          "elementos": [
+            { "origem_indice": 0, "destino_indice": 0, "rota_existe": true, "distancia_m": 1200, "duracao_s": 288.0, "duracao_sem_transito_s": 144.0, "fator_transito": 2.0 }
+          ]
+        }
+      }
+    }
+  ]
+}
+```
+
+Os valores do exemplo ilustram o formato; IDs, horários, coordenadas,
+distâncias, fatores derivados e hashes variam conforme a simulação e o
+roteamento efetivamente utilizado. Uma simulação legada sem auditoria
+experimental retorna `disponivel: false` e `null` para parâmetros e snapshot;
+o backend não infere configurações ou estado de planejamento históricos do
+ambiente atual. `planejamento.estado` pode ser `aguardando`, `planejando`,
+`concluido`, `falhou`, `interrompido` ou `desconhecido`. `integridade` informa
+`pendente`, `em_andamento`, `completa`, `incompleta` ou `desconhecida`.
+`problemas` lista inconsistências detectadas, como snapshot ausente, lacuna na
+sequência, contador divergente ou resposta de roteamento ausente. Um plano
+concluído sem consultas é válido e retorna contagem zero. Quando o backend
+reinicia, estados novos ainda `aguardando` ou `planejando` passam a
+`interrompido`; registros antigos permanecem `desconhecido`.
+
+Esse registro permite auditar as entradas e os resultados de roteamento
+consumidos. Para uma simulação com Google Routes, ele também preserva as
+respostas efetivas necessárias para reaplicar o planejamento sem depender de
+respostas futuras da API. A reprodução exata ainda depende do código indicado
+em `aplicacao.revisao_git` ou `aplicacao.build_id`; esses campos ficam `null`
+quando a aplicação não recebeu um identificador confiável.
+
+Se o SQLite não conseguir persistir uma resposta de roteamento, o resultado
+não é entregue ao motor. Os endpoints síncronos retornam `503`; na execução
+automática o POST mantém `201` para indicar criação e agendamento, enquanto
+uma falha posterior aparece em `GET /api/simulacoes/{id}` como
+`estado_execucao: "falhou"` e `erro_execucao`; o dashboard apresenta esse erro
+ao usuário. A situação do planejamento também fica disponível em
+`GET /api/simulacoes/{id}/parametros`.
 
 ```json
 [

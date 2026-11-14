@@ -8,6 +8,10 @@ from fastapi.responses import JSONResponse
 
 from app.api import cenarios, pedidos, simulacoes
 from app.domain.routing import ErroRoteamento
+from app.infrastructure.auditoria_experimental import (
+    FalhaPersistenciaAuditoriaExperimental,
+)
+from app.infrastructure.auditoria_repository import AuditoriaSimulacao
 from app.infrastructure.controle_uso_api import LimiteUsoExcedido
 from app.infrastructure.execucao_automatica import ExecucaoAutomatica
 from app.infrastructure.database import inicializar_banco
@@ -34,6 +38,7 @@ def _booleano_ambiente(nome: str, padrao: bool) -> bool:
 @asynccontextmanager
 async def ciclo_vida(app: FastAPI):
     inicializar_banco()
+    AuditoriaSimulacao.marcar_planejamentos_interrompidos()
     intervalo = float(os.getenv(VARIAVEL_INTERVALO_EXECUCAO, "0.05"))
     executor = ExecucaoAutomatica(
         intervalo_segundos=intervalo,
@@ -88,3 +93,13 @@ def erro_roteamento(_: Request, erro: ErroRoteamento):
         status_code=502,
         content={"detail": f"Falha no servico de mapas: {erro}"},
     )
+
+
+@app.exception_handler(FalhaPersistenciaAuditoriaExperimental)
+def falha_auditoria_experimental(
+    _: Request,
+    erro: FalhaPersistenciaAuditoriaExperimental,
+):
+    """Não aceita uma execução sem estado experimental persistido."""
+
+    return JSONResponse(status_code=503, content={"detail": str(erro)})

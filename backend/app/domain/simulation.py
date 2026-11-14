@@ -1,9 +1,11 @@
+import logging
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
 from enum import Enum
 from heapq import heappop, heappush
 from itertools import count
+from typing import Protocol
 
 from app.domain.distribution import (
     DistribuidorPedidos,
@@ -16,6 +18,7 @@ from app.domain.priority_queue import FilaPrioridadeHeap
 from app.domain.sla import FUSO_HORARIO, HORA_FIM, HORA_INICIO
 
 SEGUNDOS_REAIS_POR_HORA_SIMULADA = 15.0
+logger = logging.getLogger(__name__)
 
 
 class TipoEvento(str, Enum):
@@ -72,6 +75,16 @@ class EventoSimulacao:
 
 
 Observador = Callable[[EventoSimulacao], None]
+
+
+class ObservadorPlanejamento(Protocol):
+    """Callbacks opcionais para persistir o ciclo de vida do planejamento."""
+
+    def iniciar_planejamento(self) -> None: ...
+
+    def concluir_planejamento(self) -> None: ...
+
+    def falhar_planejamento(self, erro: Exception) -> None: ...
 
 
 class RelogioSimulado:
@@ -146,6 +159,8 @@ class Simulacao:
         self._plano: PlanoDistribuicao | None = None
         self._ordem_fila: list[Pedido] = []
         self._encerrada = False
+        self._observador_planejamento: ObservadorPlanejamento | None = None
+        self._erro_planejamento: Exception | None = None
 
     # Consulta do estado
 
@@ -164,6 +179,12 @@ class Simulacao:
     @property
     def plano(self) -> PlanoDistribuicao | None:
         return self._plano
+
+    @property
+    def erro_planejamento(self) -> Exception | None:
+        """Exceção original da tentativa de planejamento mais recente."""
+
+        return self._erro_planejamento
 
     @property
     def pedidos(self) -> list[Pedido]:
@@ -210,6 +231,18 @@ class Simulacao:
     def adicionar_observador(self, observador: Observador) -> None:
         self._observadores.append(observador)
 
+    def definir_observador_planejamento(
+        self,
+        observador: ObservadorPlanejamento,
+    ) -> None:
+        """Conecta a auditoria de planejamento antes do primeiro avanço."""
+
+        if self.iniciada:
+            raise RuntimeError(
+                "A auditoria de planejamento deve ser conectada antes do início."
+            )
+        self._observador_planejamento = observador
+
     # Execucao
 
     def iniciar(self) -> list[EventoSimulacao]:
@@ -220,22 +253,44 @@ class Simulacao:
 
         inicio = self.agora
         pedidos_do_snapshot = self._pedidos
+        self._erro_planejamento = None
 
-        fila = FilaPrioridadeHeap()
-        for pedido in pedidos_do_snapshot:
-            fila.adicionar_pedido(pedido, agora=inicio)
+        try:
+            # Marque o início antes de preparar os dados usados pelo
+            # distribuidor para que falhas síncronas dessa preparação também
+            # tenham um estado persistido coerente.
+            if self._observador_planejamento is not None:
+                self._observador_planejamento.iniciar_planejamento()
 
-        ordem_fila = [
-            fila.retirar_proximo()
-            for _ in range(len(pedidos_do_snapshot))
-        ]
-        # Se o planejamento falhar (servico de mapas), nada muda e
-        # a simulacao pode ser iniciada de novo.
-        self._plano = self._distribuidor.planejar(
-            ordem_fila,
-            inicio,
-            self._disponibilidade,
-        )
+            fila = FilaPrioridadeHeap()
+            for pedido in pedidos_do_snapshot:
+                fila.adicionar_pedido(pedido, agora=inicio)
+
+            ordem_fila = [
+                fila.retirar_proximo()
+                for _ in range(len(pedidos_do_snapshot))
+            ]
+            plano = self._distribuidor.planejar(
+                ordem_fila,
+                inicio,
+                self._disponibilidade,
+            )
+            if self._observador_planejamento is not None:
+                self._observador_planejamento.concluir_planejamento()
+        except Exception as erro:
+            self._erro_planejamento = erro
+            if self._observador_planejamento is not None:
+                try:
+                    self._observador_planejamento.falhar_planejamento(erro)
+                except Exception:
+                    logger.exception(
+                        "Falha ao persistir a falha de planejamento; "
+                        "preservando a exceção original (%s)",
+                        type(erro).__name__,
+                    )
+            raise
+
+        self._plano = plano
         self._ordem_fila = ordem_fila
 
         self._agendar_inicio(pedidos_do_snapshot)

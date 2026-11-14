@@ -120,6 +120,8 @@ class ExecucaoAutomatica:
                 "Falha na execução automática da simulação %s",
                 simulacao_id,
             )
+            if ativa.simulacao.erro_planejamento is not erro:
+                ativa.auditoria.falhar_planejamento(erro)
             with ativa.trava:
                 ativa.estado_execucao = EstadoExecucao.FALHOU
                 ativa.erro_execucao = str(erro)[:500]

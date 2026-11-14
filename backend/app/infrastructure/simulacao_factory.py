@@ -13,6 +13,12 @@ from app.domain.simulation import (
     Simulacao,
 )
 from app.infrastructure.auditoria_repository import AuditoriaSimulacao
+from app.infrastructure.auditoria_experimental import (
+    ServicoRoteamentoAuditavel,
+    montar_parametros_efetivos,
+    serializar_snapshot_pedidos,
+)
+from app.infrastructure.cenario_repository import obter_cenario
 from app.infrastructure.distribution_config import (
     criar_entregadores_padrao,
     obter_centro_distribuicao,
@@ -34,6 +40,7 @@ def criar_simulacao_auditada(
     segundos_reais_por_hora_simulada: int = int(
         SEGUNDOS_REAIS_POR_HORA_SIMULADA
     ),
+    intervalo_execucao_automatica_s: float | None = None,
 ) -> tuple[Simulacao, AuditoriaSimulacao]:
     """
     Cria uma simulacao dos pedidos de um cenario, gravada no SQLite.
@@ -50,18 +57,37 @@ def criar_simulacao_auditada(
     if not pedidos:
         raise ValueError(f"O cenario {cenario_id} nao possui pedidos.")
 
+    cenario = obter_cenario(cenario_id)
+    if cenario is None:
+        raise ValueError(f"O cenario {cenario_id} nao existe.")
+
+    servico_efetivo = (
+        servico
+        if servico is not None
+        else criar_servico_roteamento(provedor, fator_transito)
+    )
+    metadados_roteamento = servico_efetivo.parametros_auditoria()
+    provedor_efetivo = str(
+        metadados_roteamento.get("provedor")
+        if metadados_roteamento.get("provedor") != "desconhecido"
+        else (provedor or "desconhecido")
+    )
+    roteador_auditavel = ServicoRoteamentoAuditavel(
+        servico_efetivo,
+        provedor_efetivo,
+    )
+    centro_efetivo = (
+        centro if centro is not None else obter_centro_distribuicao()
+    )
+    entregadores_efetivos = (
+        list(entregadores)
+        if entregadores is not None
+        else criar_entregadores_padrao()
+    )
     distribuidor = DistribuidorPedidos(
-        (
-            servico
-            if servico is not None
-            else criar_servico_roteamento(provedor, fator_transito)
-        ),
-        centro if centro is not None else obter_centro_distribuicao(),
-        (
-            entregadores
-            if entregadores is not None
-            else criar_entregadores_padrao()
-        ),
+        roteador_auditavel,
+        centro_efetivo,
+        entregadores_efetivos,
         estrategia,
     )
     simulacao = Simulacao(pedidos, distribuidor, inicio, disponibilidade)
@@ -69,6 +95,34 @@ def criar_simulacao_auditada(
         raise ValueError(
             f"O cenario {cenario_id} nao possui pedidos para a simulacao."
         )
+
+    estrategia_efetiva = distribuidor.estrategia
+    parametros = montar_parametros_efetivos(
+        inicio=inicio,
+        centro=distribuidor.centro,
+        entregadores=distribuidor.entregadores,
+        estrategia=estrategia_efetiva,
+        servico=roteador_auditavel,
+        segundos_reais_por_hora_simulada=(
+            segundos_reais_por_hora_simulada
+        ),
+        disponibilidade=disponibilidade,
+        intervalo_execucao_automatica_s=(
+            intervalo_execucao_automatica_s
+        ),
+    )
+    parametros["cenario"] = {
+        "id": cenario.id,
+        "codigo": cenario.codigo,
+        "nome": cenario.nome,
+        "descricao": cenario.descricao,
+    }
+    snapshot_pedidos = serializar_snapshot_pedidos(
+        cenario,
+        pedidos,
+        inicio,
+    )
+
     auditoria = AuditoriaSimulacao.criar(
         inicio=inicio,
         centro=distribuidor.centro,
@@ -85,7 +139,13 @@ def criar_simulacao_auditada(
             default=None,
         ),
         segundos_reais_por_hora_simulada=segundos_reais_por_hora_simulada,
+        parametros=parametros,
+        snapshot_pedidos=snapshot_pedidos,
     )
+    roteador_auditavel.conectar_auditoria(
+        auditoria.registrar_consulta_roteamento
+    )
+    simulacao.definir_observador_planejamento(auditoria)
     simulacao.adicionar_observador(auditoria)
 
     return simulacao, auditoria

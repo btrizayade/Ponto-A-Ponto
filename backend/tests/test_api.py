@@ -1,13 +1,21 @@
+import asyncio
+import sqlite3
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
+from threading import Event
+from types import SimpleNamespace
 
 import pytest
 from fastapi.testclient import TestClient
 
 from app.api.registro import registro
+from app.api.schemas import NovaSimulacao
+from app.api.simulacoes import criar as criar_simulacao
 from app.domain.distribution import calcular_indice_equidade_sla
 from app.domain.routing import Coordenada, ErroRoteamento
 from app.domain.simulation import EstadoExecucao
 from app.infrastructure import database
+from app.infrastructure.auditoria_repository import AuditoriaSimulacao
 from app.infrastructure.controle_uso_api import LimiteUsoExcedido
 from app.infrastructure.google_routes import VARIAVEL_CHAVE_API
 from app.infrastructure.routing_factory import VARIAVEL_PROVEDOR
@@ -157,6 +165,186 @@ def test_nao_cria_outra_operacao_enquanto_ha_uma_ativa(cliente, estado):
     assert resposta.status_code == 409
     assert "Conclua a operação atual" in resposta.json()["detail"]
     assert len(cliente.get("/api/simulacoes").json()) == 1
+
+
+def test_criacoes_concorrentes_reservam_uma_unica_operacao(
+    cliente, monkeypatch
+):
+    gerente = cliente.app.state.execucao_automatica
+    iniciar_original = gerente.iniciar
+    inicializacao_iniciada = Event()
+    liberar_inicializacao = Event()
+
+    async def aguardar_encerramento(_, encerramento):
+        await encerramento.wait()
+        return True
+
+    async def iniciar_bloqueado(simulacao_id, ativa):
+        inicializacao_iniciada.set()
+        await asyncio.to_thread(liberar_inicializacao.wait, 2)
+        await iniciar_original(simulacao_id, ativa)
+
+    gerente.habilitada = True
+    monkeypatch.setattr(gerente, "_aguardar", aguardar_encerramento)
+    monkeypatch.setattr(gerente, "iniciar", iniciar_bloqueado)
+    corpo = {
+        "cenario_id": cliente.cenario_id,
+        "inicio": INICIO,
+        "provedor": "simulado",
+    }
+
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        primeira_futura = pool.submit(
+            cliente.post, "/api/simulacoes", json=corpo
+        )
+        assert inicializacao_iniciada.wait(2)
+
+        segunda = cliente.post("/api/simulacoes", json=corpo)
+        liberar_inicializacao.set()
+        primeira = primeira_futura.result(timeout=3)
+
+    assert primeira.status_code == 201, primeira.json()
+    assert segunda.status_code == 409, segunda.json()
+    assert registro.ids() == {primeira.json()["id"]}
+    assert len(cliente.get("/api/simulacoes").json()) == 1
+
+
+def test_falha_ao_iniciar_executor_libera_reserva_e_descarta_auditoria(
+    cliente, monkeypatch, caplog
+):
+    gerente = cliente.app.state.execucao_automatica
+    iniciar_original = gerente.iniciar
+    chamadas = 0
+
+    async def falhar_uma_vez(simulacao_id, ativa):
+        nonlocal chamadas
+        chamadas += 1
+        if chamadas == 1:
+            raise RuntimeError("falha controlada ao agendar executor")
+        await iniciar_original(simulacao_id, ativa)
+
+    monkeypatch.setattr(gerente, "iniciar", falhar_uma_vez)
+    corpo = {
+        "cenario_id": cliente.cenario_id,
+        "inicio": INICIO,
+        "provedor": "simulado",
+    }
+
+    falha = cliente.post("/api/simulacoes", json=corpo)
+
+    assert falha.status_code == 503
+    assert "execução automática" in falha.json()["detail"]
+    assert "falha controlada ao agendar executor" in caplog.text
+    assert registro.ids() == set()
+    assert registro.existe_operacao_em_andamento() is False
+    assert cliente.get("/api/simulacoes").json() == []
+
+    nova = cliente.post("/api/simulacoes", json=corpo)
+    assert nova.status_code == 201, nova.json()
+
+
+@pytest.mark.parametrize("lanca_excecao_limpeza", [False, True])
+def test_falha_de_limpeza_nao_mascara_falha_do_executor(
+    cliente, monkeypatch, caplog, lanca_excecao_limpeza
+):
+    gerente = cliente.app.state.execucao_automatica
+
+    async def falhar_inicio(*_):
+        raise RuntimeError("falha original ao agendar executor")
+
+    def falhar_limpeza(_):
+        if lanca_excecao_limpeza:
+            raise sqlite3.OperationalError("falha SQLite de limpeza")
+        return False
+
+    monkeypatch.setattr(gerente, "iniciar", falhar_inicio)
+    monkeypatch.setattr(
+        AuditoriaSimulacao,
+        "descartar_criacao_sem_eventos",
+        falhar_limpeza,
+    )
+    resposta = cliente.post(
+        "/api/simulacoes",
+        json={
+            "cenario_id": cliente.cenario_id,
+            "inicio": INICIO,
+            "provedor": "simulado",
+        },
+    )
+
+    assert resposta.status_code == 503
+    assert "falha original ao agendar executor" in caplog.text
+    assert "auditoria pode ter permanecido no banco" in caplog.text
+    assert registro.ids() == set()
+    assert registro.existe_operacao_em_andamento() is False
+    assert len(cliente.get("/api/simulacoes").json()) == 1
+
+    logs_limpeza = [
+        registro_log
+        for registro_log in caplog.records
+        if "Falha ao descartar a auditoria" in registro_log.message
+    ]
+    if lanca_excecao_limpeza:
+        assert len(logs_limpeza) == 1
+        assert logs_limpeza[0].exc_info is not None
+        assert "simulação 1" in logs_limpeza[0].message
+    else:
+        assert any(
+            "A auditoria da simulação 1 não foi descartada"
+            in registro_log.message
+            for registro_log in caplog.records
+        )
+
+
+def test_cancelamento_nao_e_mascarado_por_falha_de_limpeza(
+    cliente, monkeypatch, caplog
+):
+    gerente = cliente.app.state.execucao_automatica
+
+    async def cancelar_inicio(*_):
+        raise asyncio.CancelledError
+
+    def falhar_limpeza(_):
+        raise sqlite3.OperationalError("falha SQLite de limpeza")
+
+    monkeypatch.setattr(gerente, "iniciar", cancelar_inicio)
+    monkeypatch.setattr(
+        AuditoriaSimulacao,
+        "descartar_criacao_sem_eventos",
+        falhar_limpeza,
+    )
+
+    with pytest.raises(asyncio.CancelledError):
+        asyncio.run(
+            criar_simulacao(
+                NovaSimulacao(
+                    cenario_id=cliente.cenario_id,
+                    inicio=datetime.fromisoformat(INICIO),
+                    provedor="simulado",
+                ),
+                SimpleNamespace(app=cliente.app),
+            )
+        )
+
+    assert "auditoria pode ter permanecido no banco" in caplog.text
+    assert registro.ids() == set()
+    assert registro.existe_operacao_em_andamento() is False
+
+
+def test_erro_de_validacao_antes_da_criacao_libera_reserva(cliente):
+    corpo = {
+        "cenario_id": 999,
+        "inicio": INICIO,
+        "provedor": "simulado",
+    }
+
+    resposta = cliente.post("/api/simulacoes", json=corpo)
+    assert resposta.status_code == 404
+    assert registro.existe_operacao_em_andamento() is False
+
+    corpo["cenario_id"] = cliente.cenario_id
+    nova = cliente.post("/api/simulacoes", json=corpo)
+    assert nova.status_code == 201, nova.json()
 
 
 def test_nova_execucao_preserva_eventos_da_execucao_concluida(cliente):
@@ -319,7 +507,11 @@ def test_cenario_alta_demanda_forca_simulado_com_fator_dois(
 
     ativa = registro.obter(estado["id"])
     servico = ativa.simulacao.distribuidor._servico
-    assert isinstance(servico, ServicoRoteamentoSimulado)
+    assert servico.parametros_auditoria()["provedor"] == "simulado"
+    assert (
+        servico.parametros_auditoria()["modelo"]["transito"]["fator_fixo"]
+        == 2.0
+    )
     assert servico.perfil_consulta.endswith(":2.0")
 
     matriz = servico.calcular_matriz(
@@ -367,7 +559,11 @@ def test_cenarios_normal_e_equidade_mantem_transito_por_horario(cliente):
         assert resposta.status_code == 201, resposta.json()
         ativa = registro.obter(resposta.json()["id"])
         servico = ativa.simulacao.distribuidor._servico
-        assert isinstance(servico, ServicoRoteamentoSimulado)
+        assert servico.parametros_auditoria()["provedor"] == "simulado"
+        assert (
+            servico.parametros_auditoria()["modelo"]["transito"]["modo"]
+            == "horario"
+        )
         assert servico.perfil_consulta.endswith(":horario")
         matriz = servico.calcular_matriz(
             [ativa.simulacao.distribuidor.centro.coordenada],

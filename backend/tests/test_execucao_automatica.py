@@ -85,10 +85,27 @@ def esperar_estado(cliente, simulacao_id, predicado):
 
 def test_criacao_inicia_avanco_e_conclusao_automaticos(cliente, monkeypatch):
     gerente = cliente.app.state.execucao_automatica
+
+    iniciar_original = gerente.iniciar
+
+    async def iniciar_com_relogio_controlado(simulacao_id, ativa):
+        # O teste conclui a linha do tempo imediatamente; o relógio real não
+        # deve avançá-la em paralelo enquanto o endpoint consulta o estado.
+        ativa.relogio_monotonic = lambda: 0
+        await iniciar_original(simulacao_id, ativa)
+
+    monkeypatch.setattr(gerente, "iniciar", iniciar_com_relogio_controlado)
+
+    def executar_ate_o_fim_serializado(ativa):
+        # O executor real serializa o avanço com as requisições que sincronizam
+        # o relógio. O mock deve preservar esse contrato do fluxo de produção.
+        with ativa.trava:
+            ativa.simulacao.executar_ate_o_fim()
+
     monkeypatch.setattr(
         gerente,
         "_avancar_relogio",
-        lambda ativa: ativa.simulacao.executar_ate_o_fim(),
+        executar_ate_o_fim_serializado,
     )
     criada = criar(cliente)
     simulacao_id = criada["id"]
@@ -219,5 +236,17 @@ def test_falha_da_etapa_fica_exposta_no_estado(cliente):
     )
 
     assert estado["erro_execucao"] == "erro controlado no executor"
+    parametros = cliente.get(
+        f"/api/simulacoes/{criada['id']}/parametros"
+    ).json()
+    # A falha simulada ocorre depois do planejamento concluído; o estado
+    # histórico do plano permanece correto enquanto a falha operacional fica
+    # visível no endpoint de estado em memória.
+    assert parametros["planejamento"]["estado"] == "concluido"
+    assert parametros["planejamento"]["integridade"] == "completa"
     assert cliente.post(f"/api/simulacoes/{criada['id']}/retomar").status_code == 409
     assert cliente.post(f"/api/simulacoes/{criada['id']}/executar").status_code == 409
+
+    nova = criar(cliente)
+    assert nova["id"] != criada["id"]
+    assert nova["estado_execucao"] == "executando"

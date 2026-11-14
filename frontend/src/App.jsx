@@ -8,6 +8,7 @@ import FilaPedidos from './components/FilaPedidos/FilaPedidos'
 import EstadoOperacao from './components/EstadoOperacao/EstadoOperacao'
 import NovoPedido from './components/NovoPedido/NovoPedido'
 import { buscarRotas, buscarSimulacao } from './services/api'
+import { mensagemFalhaExecucao } from './utils/mensagemFalhaExecucao'
 
 import './App.css'
 
@@ -162,6 +163,7 @@ function App() {
   }
 
   const tempoSimulacao = formatarTempoSimulado()
+  const erroExecucao = mensagemFalhaExecucao(simulacao)
 
   return (
     <div className="app">
@@ -178,9 +180,9 @@ function App() {
             Não foi possível atualizar a simulação: {erroConsulta}
           </p>
         )}
-        {simulacao?.estado_execucao === 'falhou' && (
+        {erroExecucao && (
           <p role="alert" className="erro-atualizacao">
-            A execução automática falhou: {simulacao.erro_execucao || 'consulte os logs do backend.'}
+            {erroExecucao}
           </p>
         )}
 

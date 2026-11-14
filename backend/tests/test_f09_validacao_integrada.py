@@ -15,7 +15,6 @@ from app.infrastructure.seed import inicializar_todos_cenarios
 from app.infrastructure.simulated_routing import (
     FATOR_TRANSITO_ALTA_DEMANDA,
     FATOR_TRANSITO_NORMAL,
-    ServicoRoteamentoSimulado,
 )
 from app.main import app
 
@@ -147,7 +146,7 @@ def test_cadastro_consulta_e_execucao_dos_tres_cenarios(cliente_tres_cenarios):
         ativa = registro.obter(criada["id"])
         assert_limites_operacionais(ativa)
         servico = ativa.simulacao.distribuidor._servico
-        assert isinstance(servico, ServicoRoteamentoSimulado)
+        assert servico.parametros_auditoria()["provedor"] == "simulado"
         fator_esperado = (
             FATOR_TRANSITO_ALTA_DEMANDA
             if codigo == "ALTA_DEMANDA"
