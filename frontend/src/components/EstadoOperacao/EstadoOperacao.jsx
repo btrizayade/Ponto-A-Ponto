@@ -7,7 +7,7 @@ import {
 
 import './EstadoOperacao.css'
 
-function EstadoOperacao({ simulacao = null }) {
+function EstadoOperacao({ simulacao = null, rotas = null }) {
   // Dados reais retornados pelo backend
   const entregadores = simulacao?.entregadores || []
   const pedidos = simulacao?.pedidos || []
@@ -30,6 +30,9 @@ function EstadoOperacao({ simulacao = null }) {
       <div className="lista-entregadores">
 
         {entregadores.map((entregador) => {
+          const viagens = rotas?.rotas
+            ?.find((rota) => rota.entregador_codigo === entregador.codigo)
+            ?.viagens || []
 
           // Conta apenas os pedidos que ainda não foram entregues
           const paradasRestantes = pedidos.filter(
@@ -74,6 +77,18 @@ function EstadoOperacao({ simulacao = null }) {
                 </div>
 
               </div>
+
+              {viagens.length > 0 && (
+                <ul className="lista-viagens">
+                  {viagens.map((viagem) => (
+                    <li key={viagem.numero}>
+                      <span>Viagem {viagem.numero}</span>
+                      <span>{viagem.situacao.replace('_', ' ')}</span>
+                      <span>{viagem.paradas.length} paradas</span>
+                    </li>
+                  ))}
+                </ul>
+              )}
 
             </div>
           )

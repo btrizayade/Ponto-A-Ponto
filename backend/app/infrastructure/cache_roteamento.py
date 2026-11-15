@@ -65,6 +65,7 @@ class ServicoRoteamentoComCache(ServicoRoteamento):
         self.pares_do_cache = 0
         self.pares_consultados = 0
         self.rotas_do_cache = 0
+        self.ultima_origem_consulta = "desconhecido"
 
     @classmethod
     def do_ambiente(
@@ -90,6 +91,21 @@ class ServicoRoteamentoComCache(ServicoRoteamento):
     @property
     def perfil_consulta(self) -> str:
         return self._servico.perfil_consulta
+
+    def parametros_auditoria(self) -> dict[str, object]:
+        """Configuracao efetiva do provedor e do cache desta instancia."""
+
+        parametros = self._servico.parametros_auditoria()
+        return {
+            **parametros,
+            "cache": {
+                "janela_minutos": self._janela_min,
+                "precisao_coordenada_decimais": CASAS_DECIMAIS_CHAVE,
+                "fuso_horario_faixa": FUSO_HORARIO.key,
+                "chave_matriz": "perfil+origem+destino+faixa_horario",
+                "chave_rota": "perfil+paradas+faixa_horario",
+            },
+        }
 
     def fechar(self) -> None:
         """Fecha o servico envolvido, como o cliente HTTP da Google."""
@@ -140,6 +156,13 @@ class ServicoRoteamentoComCache(ServicoRoteamento):
             self._salvar_pares(novos, faixa)
             conhecidos.update(novos)
 
+        if not faltantes:
+            self.ultima_origem_consulta = "cache"
+        elif total_pares > len(faltantes):
+            self.ultima_origem_consulta = "misto"
+        else:
+            self.ultima_origem_consulta = "provedor"
+
         matriz = MatrizDistancias(
             origens=list(origens),
             destinos=list(destinos),
@@ -189,6 +212,7 @@ class ServicoRoteamentoComCache(ServicoRoteamento):
 
         if registro is not None:
             self.rotas_do_cache += 1
+            self.ultima_origem_consulta = "cache"
             return _rota_de_json(registro["dados"])
 
         rota = self._servico.calcular_rota(
@@ -198,6 +222,7 @@ class ServicoRoteamentoComCache(ServicoRoteamento):
             partida_em=partida_em,
         )
         self.consultas_externas += 1
+        self.ultima_origem_consulta = "provedor"
 
         with conectar() as conexao:
             conexao.execute(

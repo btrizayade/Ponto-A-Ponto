@@ -43,12 +43,23 @@ def provedor_padrao() -> str:
 
 def criar_servico_roteamento(
     provedor: str | None = None,
+    fator_transito: float | None = None,
 ) -> ServicoRoteamento:
-    """Cria o servico de roteamento informado ou o padrao do ambiente."""
+    """Cria o servico de roteamento informado ou o padrao do ambiente.
+
+    O fator fixo e aceito somente pelo roteador simulado. Provedores
+    externos retornam tempos com seu proprio modelo de transito.
+    """
 
     provedor = (provedor or "").strip().lower() or provedor_padrao()
 
     if provedor == PROVEDOR_GOOGLE:
+        if fator_transito is not None:
+            raise ValueError(
+                "O fator fixo de transito so pode ser usado com "
+                "o provedor simulado."
+            )
+
         # Consultas repetidas saem do cache e nao consomem o limite diario.
         return ServicoRoteamentoComCache.do_ambiente(
             ServicoRoteamentoGoogle(
@@ -57,6 +68,6 @@ def criar_servico_roteamento(
         )
 
     if provedor == PROVEDOR_SIMULADO:
-        return ServicoRoteamentoSimulado()
+        return ServicoRoteamentoSimulado(fator_transito=fator_transito)
 
     raise ValueError(f"Provedor de mapas desconhecido: {provedor}.")

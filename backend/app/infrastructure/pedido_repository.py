@@ -1,7 +1,14 @@
 import sqlite3
+from collections.abc import Sequence
 from datetime import datetime
 
-from app.domain.models import Bairro, CategoriaProduto, Pedido, StatusPedido
+from app.domain.models import (
+    Bairro,
+    CategoriaProduto,
+    OrigemPedido,
+    Pedido,
+    StatusPedido,
+)
 from app.domain.sla import calcular_prazo_entrega
 from app.infrastructure.database import conectar
 
@@ -18,6 +25,8 @@ COLUNAS_PEDIDO = """
     p.tempo_servico_min,
     p.criado_em,
     p.prazo_entrega_em,
+    p.origem,
+    p.ativo,
     b.id AS bairro_id,
     b.nome AS bairro_nome,
     b.latitude,
@@ -74,6 +83,8 @@ def _criar_pedido_do_registro(
             if registro["prazo_entrega_em"] is not None
             else None
         ),
+        origem=OrigemPedido(registro["origem"]),
+        ativo=bool(registro["ativo"]),
     )
 
 
@@ -95,11 +106,14 @@ def _sincronizar_pedido(
     destino.tempo_servico_min = origem.tempo_servico_min
     destino.criado_em = origem.criado_em
     destino.prazo_entrega_em = origem.prazo_entrega_em
+    destino.origem = origem.origem
+    destino.ativo = origem.ativo
 
 
 def obter_ou_criar_pedido(
     pedido: Pedido,
     cenario_id: int,
+    origem: OrigemPedido = OrigemPedido.MANUAL,
 ) -> Pedido:
     """Retorna um pedido existente ou cadastra um novo."""
 
@@ -138,9 +152,11 @@ def obter_ou_criar_pedido(
                         tempo_servico_min,
                         criado_em,
                         prazo_entrega_em,
-                        status
+                        status,
+                        origem,
+                        ativo
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(cenario_id, codigo) DO NOTHING
                     """,
                     (
@@ -157,10 +173,26 @@ def obter_ou_criar_pedido(
                         pedido.criado_em.isoformat(),
                         pedido.prazo_entrega_em.isoformat(),
                         StatusPedido.PENDENTE.value,
+                        origem.value,
+                        1,
                     ),
                 )
 
                 # Recupera os dados efetivamente armazenados.
+                registro = _buscar_registro_pedido(
+                    conexao,
+                    cenario_id,
+                    codigo,
+                )
+            elif origem == OrigemPedido.REFERENCIA:
+                conexao.execute(
+                    """
+                    UPDATE pedidos
+                    SET origem = 'referencia', ativo = 1
+                    WHERE cenario_id = ? AND codigo = ?
+                    """,
+                    (cenario_id, codigo),
+                )
                 registro = _buscar_registro_pedido(
                     conexao,
                     cenario_id,
@@ -195,6 +227,7 @@ def listar_pedidos_por_cenario(
             FROM pedidos AS p
             INNER JOIN bairros AS b ON b.id = p.bairro_id
             WHERE p.cenario_id = ?
+              AND p.ativo = 1
             ORDER BY p.id
             """,
             (cenario_id,),
@@ -204,3 +237,26 @@ def listar_pedidos_por_cenario(
         _criar_pedido_do_registro(registro)
         for registro in registros
     ]
+
+
+def desativar_referencias_fora_do_seed(
+    cenario_id: int,
+    codigos_ativos: Sequence[str],
+) -> None:
+    """Arquiva somente registros de referência ausentes do seed atual."""
+
+    if not codigos_ativos:
+        raise ValueError("O manifesto de pedidos de referência não pode ser vazio.")
+
+    placeholders = ", ".join("?" for _ in codigos_ativos)
+    with conectar() as conexao:
+        conexao.execute(
+            f"""
+            UPDATE pedidos
+            SET ativo = 0
+            WHERE cenario_id = ?
+              AND origem = 'referencia'
+              AND codigo NOT IN ({placeholders})
+            """,
+            (cenario_id, *codigos_ativos),
+        )

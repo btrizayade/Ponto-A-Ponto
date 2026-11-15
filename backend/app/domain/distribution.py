@@ -29,8 +29,51 @@ FATOR_PESO_PRIORIDADE = 0.5
 PENALIDADE_INVERSAO_MIN = 5.0
 PESO_TERMINO = 1.0
 
+# A parcela territorial e expressa em minutos equivalentes. Um ponto de
+# atraso normalizado representa uma duracao completa de SLA e recebe o
+# mesmo peso-base da penalidade fixa de um pedido atrasado.
+PESO_EQUIDADE_POR_SLA = PENALIDADE_ATRASO_MIN
+PESO_PIOR_BAIRRO = 0.5
+PESO_DISPARIDADE_BAIRRO = 0.5
+
 MAX_RODADAS_MELHORIA = 50
 TOLERANCIA_MELHORIA = 1e-9
+
+
+def calcular_indice_equidade_sla(
+    atrasos_por_bairro: Mapping[str, Sequence[float]],
+) -> float:
+    """Resume atrasos normalizados, dando o mesmo peso a cada bairro.
+
+    Bairros sem amostras nao entram como zeros. Amostras negativas ou
+    nao finitas sao ignoradas, assim como um bairro sem nenhuma amostra
+    valida. A media de cada bairro evita que regiões com mais pedidos
+    dominem a medida territorial.
+    """
+
+    medias = []
+
+    for amostras in atrasos_por_bairro.values():
+        validas = [
+            valor for valor in amostras
+            if isfinite(valor) and valor >= 0
+        ]
+
+        if validas:
+            medias.append(sum(validas) / len(validas))
+
+    if not medias:
+        return 0.0
+
+    pior_bairro = max(medias)
+    media_territorial = sum(medias) / len(medias)
+    disparidade = pior_bairro - min(medias)
+
+    return (
+        media_territorial
+        + PESO_PIOR_BAIRRO * pior_bairro
+        + PESO_DISPARIDADE_BAIRRO * disparidade
+    )
 
 
 @dataclass(frozen=True)
@@ -759,6 +802,212 @@ class DistribuicaoOrdemDaFila(EstrategiaDistribuicao):
             estado, entregadores, centro, mapa,
             partida_em, inicios, nao_atribuidos,
         )
+
+
+class DistribuicaoEquidadeSLA(EstrategiaDistribuicao):
+    """Minimiza custo operacional e atrasos normalizados por bairro.
+
+    Os pedidos sao inseridos na ordem de prioridade recebida. Cada
+    alternativa respeita capacidade, quantidade de paradas e rotas, e
+    e avaliada pelo mesmo custo base da insercao mais barata. Soma-se
+    a ele uma penalidade territorial calculada globalmente sobre as
+    previsoes de entrega.
+
+    Para cada bairro com pedidos que tenham um SLA valido, calcula a
+    media do atraso normalizado dos seus pedidos. Os bairros tem peso
+    igual, independentemente do numero de pedidos; bairros vazios ou
+    sem amostras validas sao omitidos. A penalidade combina a media
+    entre bairros, o pior resultado e a amplitude entre o melhor e o
+    pior resultado.
+    """
+
+    def distribuir(
+        self,
+        pedidos: Sequence[Pedido],
+        entregadores: Sequence[Entregador],
+        centro: CentroDistribuicao,
+        mapa: MapaDeslocamentos,
+        partida_em: datetime,
+        disponibilidade: Mapping[str, datetime] | None = None,
+    ) -> PlanoDistribuicao:
+        _validar_entrada(pedidos, entregadores)
+        inicios = _inicios_min(entregadores, partida_em, disponibilidade)
+        avaliador_base = _Avaliador(pedidos, mapa, partida_em)
+        avaliador = _AvaliadorEquidadeSLA(
+            avaliador_base,
+            mapa,
+            partida_em,
+        )
+        estado: list[Viagens] = [[] for _ in entregadores]
+        nao_atribuidos = []
+
+        for pedido in pedidos:
+            melhor = self._melhor_insercao(
+                pedido, estado, entregadores, inicios, avaliador
+            )
+
+            if melhor is None:
+                nao_atribuidos.append(pedido)
+                continue
+
+            _, indice, viagens = melhor
+            estado[indice] = viagens
+
+        self._melhorar(estado, entregadores, inicios, avaliador)
+
+        return montar_plano(
+            estado,
+            entregadores,
+            centro,
+            mapa,
+            partida_em,
+            inicios,
+            nao_atribuidos,
+        )
+
+    def _melhor_insercao(
+        self,
+        pedido: Pedido,
+        estado: list[Viagens],
+        entregadores: Sequence[Entregador],
+        inicios: Sequence[float],
+        avaliador: "_AvaliadorEquidadeSLA",
+    ) -> tuple[float, int, Viagens] | None:
+        """Avalia insercoes validas pelo custo global, incluindo equidade."""
+
+        melhor = None
+
+        for indice, entregador in enumerate(entregadores):
+            if not _cabe_no_entregador(pedido, entregador):
+                continue
+
+            original = estado[indice]
+
+            for viagens in _candidatos(pedido, original, entregador):
+                estado[indice] = viagens
+                custo = avaliador.custo_global(estado, inicios)
+                estado[indice] = original
+
+                if not isfinite(custo):
+                    continue
+
+                if melhor is None or custo < melhor[0] - TOLERANCIA_MELHORIA:
+                    melhor = (custo, indice, viagens)
+
+        return melhor
+
+    def _melhorar(
+        self,
+        estado: list[Viagens],
+        entregadores: Sequence[Entregador],
+        inicios: Sequence[float],
+        avaliador: "_AvaliadorEquidadeSLA",
+    ) -> None:
+        """Realoca pedidos enquanto reduz o custo global combinado."""
+
+        for _ in range(MAX_RODADAS_MELHORIA):
+            houve_melhoria = False
+
+            for indice_origem in range(len(estado)):
+                pedidos_origem = [
+                    pedido
+                    for viagem in estado[indice_origem]
+                    for pedido in viagem
+                ]
+
+                for pedido in pedidos_origem:
+                    custo_atual = avaliador.custo_global(estado, inicios)
+                    original = estado[indice_origem]
+                    estado[indice_origem] = _remover(original, pedido)
+                    melhor = self._melhor_insercao(
+                        pedido,
+                        estado,
+                        entregadores,
+                        inicios,
+                        avaliador,
+                    )
+
+                    if (
+                        melhor is not None
+                        and melhor[0]
+                        < custo_atual - TOLERANCIA_MELHORIA
+                    ):
+                        _, indice, viagens = melhor
+                        estado[indice] = viagens
+                        houve_melhoria = True
+                    else:
+                        estado[indice_origem] = original
+
+            if not houve_melhoria:
+                return
+
+
+class _AvaliadorEquidadeSLA:
+    """Combina o custo existente com a diferenca territorial prevista."""
+
+    def __init__(
+        self,
+        avaliador_base: _Avaliador,
+        mapa: MapaDeslocamentos,
+        partida_em: datetime,
+    ) -> None:
+        self._base = avaliador_base
+        self._mapa = mapa
+        self._partida_em = partida_em
+
+    def custo_global(
+        self,
+        estado: list[Viagens],
+        inicios: Sequence[float],
+    ) -> float:
+        """Retorna custo base mais penalidade territorial normalizada."""
+
+        avaliacoes = [
+            self._base.custo(viagens, inicio)
+            for viagens, inicio in zip(estado, inicios)
+        ]
+        custo_base = sum(custo for custo, _ in avaliacoes)
+        termino = max((fim for _, fim in avaliacoes), default=0.0)
+        custo_base += PESO_TERMINO * termino
+
+        atrasos_por_bairro: dict[str, list[float]] = {}
+
+        for viagens, inicio in zip(estado, inicios):
+            instante = inicio
+
+            for viagem in viagens:
+                anterior = None
+
+                for pedido in viagem:
+                    instante += self._mapa.duracao_min(anterior, pedido)
+                    instante += pedido.tempo_servico_min
+                    prazo = pedido.prazo_entrega_em
+
+                    if prazo is not None and isfinite(instante):
+                        duracao_sla_min = (
+                            prazo - pedido.criado_em
+                        ).total_seconds() / 60
+
+                        # SLA ausente, nulo ou invalido nao vira amostra zero.
+                        if isfinite(duracao_sla_min) and duracao_sla_min > 0:
+                            prazo_min = (
+                                prazo - self._partida_em
+                            ).total_seconds() / 60
+                            atraso_min = max(0.0, instante - prazo_min)
+                            normalizado = atraso_min / duracao_sla_min
+                            atrasos_por_bairro.setdefault(
+                                pedido.bairro.nome, []
+                            ).append(normalizado)
+
+                    anterior = pedido
+
+                instante += self._mapa.duracao_min(anterior, None)
+
+        penalidade_territorial = PESO_EQUIDADE_POR_SLA * (
+            calcular_indice_equidade_sla(atrasos_por_bairro)
+        )
+
+        return custo_base + penalidade_territorial
 
 
 class DistribuidorPedidos:

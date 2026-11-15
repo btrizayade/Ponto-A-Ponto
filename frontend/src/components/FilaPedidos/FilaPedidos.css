@@ -27,6 +27,10 @@
   font-size: 13px;
 }
 
+.fila-inicio-simulado {
+  margin-top: 6px;
+}
+
 .fila-total {
   display: flex;
   align-items: center;
@@ -62,6 +66,15 @@
   background-color: #F8FAFC;
 }
 
+.pedido-item.pedido-com-atualizacao {
+  animation: destaque-atualizacao 0.9s ease-out;
+}
+
+@keyframes destaque-atualizacao {
+  from { background-color: #fff3cd; }
+  to { background-color: transparent; }
+}
+
 /* Identificação do pedido */
 .pedido-identificacao {
   display: flex;
@@ -82,6 +95,11 @@
   font-size: 12px;
   font-weight: 600;
   white-space: nowrap;
+}
+
+.pedido-status.status-proxima_simulacao {
+  color: #6941c6;
+  background-color: #f4f3ff;
 }
 
 .status-pendente,
@@ -113,6 +131,27 @@
   gap: 8px;
   color: var(--cor-texto-secundario);
   font-size: 13px;
+}
+
+.pedido-tempos {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: 10px 16px;
+  padding-top: 10px;
+  border-top: 1px solid var(--cor-borda);
+  color: var(--cor-texto-secundario);
+  font-size: 12px;
+}
+
+.pedido-tempos > div {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.pedido-tempos strong {
+  color: var(--cor-primaria);
 }
 
 /* Pontuação e posição na fila */

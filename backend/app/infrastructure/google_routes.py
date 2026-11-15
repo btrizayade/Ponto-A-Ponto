@@ -113,6 +113,33 @@ class ServicoRoteamentoGoogle(ServicoRoteamento):
     def perfil_consulta(self) -> str:
         return f"google:{self._preferencia}"
 
+    def parametros_auditoria(self) -> dict[str, object]:
+        """Opcoes efetivas da Google Routes, sem chave ou cabecalhos secretos."""
+
+        return {
+            "provedor": "google",
+            "classe": type(self).__name__,
+            "perfil": self.perfil_consulta,
+            "transito": {
+                "politica": "gerenciada_pelo_provedor",
+                "fator_fixo_aplicado": None,
+            },
+            "api": {
+                "modo_viagem": "DRIVE",
+                "preferencia_roteamento": self._preferencia,
+                "field_mask_matriz": CAMPOS_MATRIZ,
+                "field_mask_rota": CAMPOS_ROTA,
+                "alternativas": False,
+                "qualidade_polyline": "HIGH_QUALITY",
+                "codificacao_polyline": "ENCODED_POLYLINE",
+                "idioma": "pt-BR",
+                "unidades": "METRIC",
+                "margem_partida_futura_segundos": (
+                    MARGEM_PARTIDA_FUTURA.total_seconds()
+                ),
+            },
+        }
+
     def fechar(self) -> None:
         """Fecha o cliente HTTP criado pelo proprio servico."""
 

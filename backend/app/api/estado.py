@@ -11,6 +11,8 @@ from app.api.schemas import (
     EstadoSimulacao,
     EventoResposta,
     Indicadores,
+    IndicadoresBairro,
+    IndicadoresEquidadeTerritorial,
     ParadaMapa,
     PedidoResposta,
     PedidoSimulacao,
@@ -19,10 +21,16 @@ from app.api.schemas import (
     RotasSimulacao,
     ViagemMapa,
 )
-from app.domain.distribution import CentroDistribuicao, Parada, Viagem
+from app.domain.distribution import (
+    CentroDistribuicao,
+    Parada,
+    Viagem,
+    calcular_indice_equidade_sla,
+)
 from app.domain.models import Pedido, StatusPedido
 from app.domain.priority_scoring import calcular_prioridade
 from app.domain.simulation import EventoSimulacao, TipoEvento
+from app.infrastructure.bairro_repository import listar_bairros
 
 
 def centro_resposta(centro: CentroDistribuicao) -> Centro:
@@ -54,6 +62,7 @@ class _ResumoPedido:
     entregue_em: datetime | None = None
     atraso_min: float | None = None
     observacao: str = ""
+    atualizado_em: datetime | None = None
 
 
 @dataclass
@@ -94,6 +103,7 @@ class _Historico:
         if evento.pedido_codigo:
             pedido = self.pedidos[evento.pedido_codigo]
             pedido.observacao = evento.detalhe
+            pedido.atualizado_em = evento.instante
 
             if tipo == TipoEvento.PEDIDO_ATRIBUIDO:
                 pedido.entregador_codigo = evento.entregador_codigo
@@ -181,6 +191,7 @@ def montar_estado(ativa: SimulacaoAtiva) -> EstadoSimulacao:
                 viagem_numero=resumo.viagem_numero,
                 previsao_entrega_em=previsao,
                 entregue_em=resumo.entregue_em,
+                atualizado_em=resumo.atualizado_em,
                 atraso_min=resumo.atraso_min,
                 observacao=resumo.observacao,
             )
@@ -191,6 +202,11 @@ def montar_estado(ativa: SimulacaoAtiva) -> EstadoSimulacao:
         cenario_id=ativa.cenario_id,
         provedor=ativa.provedor,
         estrategia=ativa.estrategia,
+        segundos_reais_por_hora_simulada=(
+            ativa.segundos_reais_por_hora_simulada
+        ),
+        estado_execucao=ativa.estado_execucao,
+        erro_execucao=ativa.erro_execucao,
         inicio=ativa.inicio,
         agora=simulacao.agora,
         proximo_instante=simulacao.proximo_instante,
@@ -307,8 +323,8 @@ def _fila(
     posicoes: dict[str, int],
 ) -> list[str]:
     """
-    Pedidos na fila: primeiro os da ordem de planejamento, depois os
-    que entraram depois do inicio, pela data de criacao.
+    Pedidos nao atribuidos na ordem de planejamento; desempata pela
+    data historica de criacao.
     """
 
     na_fila = [p for p in pedidos if status[p.codigo] == StatusPedido.NA_FILA]
@@ -322,6 +338,205 @@ def _fila(
     return [p.codigo for p in na_fila]
 
 
+def _sla_valido(pedido: Pedido) -> bool:
+    prazo = pedido.prazo_entrega_em
+    return prazo is not None and prazo > pedido.criado_em
+
+
+def _indicadores_territoriais(simulacao, historico, status):
+    """Calcula resultados observados e riscos separados, por bairro."""
+
+    dados = {}
+
+    for bairro in listar_bairros():
+        dados[bairro.nome] = {
+            "total": 0,
+            "entregues": 0,
+            "entregues_sla": 0,
+            "no_prazo": 0,
+            "atrasados": [],
+            "tempos_entrega": [],
+            "pendentes": 0,
+            "pendentes_vencidos": 0,
+            "em_andamento": 0,
+            "em_risco_sla": 0,
+        }
+
+    amostras_normalizadas: dict[str, list[float]] = defaultdict(list)
+    paradas = _paradas_por_pedido(simulacao.plano)
+    pendentes = {StatusPedido.PENDENTE, StatusPedido.NA_FILA}
+    em_andamento = {StatusPedido.ATRIBUIDO, StatusPedido.EM_ROTA}
+
+    for pedido in simulacao.pedidos:
+        nome_bairro = pedido.bairro.nome
+        bairro = dados.setdefault(
+            nome_bairro,
+            {
+                "total": 0,
+                "entregues": 0,
+                "entregues_sla": 0,
+                "no_prazo": 0,
+                "atrasados": [],
+                "tempos_entrega": [],
+                "pendentes": 0,
+                "pendentes_vencidos": 0,
+                "em_andamento": 0,
+                "em_risco_sla": 0,
+            },
+        )
+        bairro["total"] += 1
+        situacao = status[pedido.codigo]
+        resumo = historico.pedidos[pedido.codigo]
+        prazo_valido = _sla_valido(pedido)
+
+        if situacao in pendentes:
+            bairro["pendentes"] += 1
+
+            if prazo_valido and pedido.prazo_entrega_em < simulacao.agora:
+                bairro["pendentes_vencidos"] += 1
+
+        elif situacao in em_andamento:
+            bairro["em_andamento"] += 1
+            parada, viagem = paradas.get(pedido.codigo, (None, None))
+            previsao = (
+                parada.saida_em
+                if parada
+                and resumo.entregador_codigo
+                and resumo.entregue_em is None
+                and viagem.partida_em <= simulacao.fim_expediente
+                else None
+            )
+
+            if prazo_valido and (
+                pedido.prazo_entrega_em < simulacao.agora
+                or (previsao is not None and previsao > pedido.prazo_entrega_em)
+            ):
+                bairro["em_risco_sla"] += 1
+
+        elif situacao == StatusPedido.ENTREGUE:
+            bairro["entregues"] += 1
+            entregue_em = resumo.entregue_em
+
+            # Uma mudanca de status sem horario de entrega nao pode
+            # produzir tempo ou cumprimento de SLA observados.
+            if entregue_em is None:
+                continue
+
+            bairro["tempos_entrega"].append(
+                max(
+                    0.0,
+                    (entregue_em - pedido.criado_em).total_seconds() / 60,
+                )
+            )
+
+            if not prazo_valido:
+                continue
+
+            bairro["entregues_sla"] += 1
+            atraso_min = max(
+                0.0,
+                (entregue_em - pedido.prazo_entrega_em).total_seconds() / 60,
+            )
+
+            if atraso_min > 0:
+                bairro["atrasados"].append(atraso_min)
+            else:
+                bairro["no_prazo"] += 1
+
+            duracao_sla_min = (
+                pedido.prazo_entrega_em - pedido.criado_em
+            ).total_seconds() / 60
+            amostras_normalizadas[nome_bairro].append(
+                atraso_min / duracao_sla_min
+            )
+
+    indicadores_bairro = []
+    for nome_bairro, valores in sorted(dados.items()):
+        amostras = amostras_normalizadas.get(nome_bairro, [])
+        validos = valores["entregues_sla"]
+        entregues = valores["entregues"]
+        indicadores_bairro.append(
+            IndicadoresBairro(
+                bairro=nome_bairro,
+                total_pedidos=valores["total"],
+                entregues=entregues,
+                entregues_com_sla_valido=validos,
+                entregues_no_prazo=valores["no_prazo"],
+                entregues_atrasados=len(valores["atrasados"]),
+                pendentes=valores["pendentes"],
+                pendentes_vencidos=valores["pendentes_vencidos"],
+                em_andamento=valores["em_andamento"],
+                em_risco_sla=valores["em_risco_sla"],
+                tempo_medio_entrega_min=(
+                    round(
+                        sum(valores["tempos_entrega"])
+                        / len(valores["tempos_entrega"]),
+                        1,
+                    )
+                    if valores["tempos_entrega"]
+                    else None
+                ),
+                atraso_medio_min=(
+                    round(
+                        sum(valores["atrasados"])
+                        / len(valores["atrasados"]),
+                        1,
+                    )
+                    if valores["atrasados"]
+                    else None
+                ),
+                percentual_cumprimento_sla=(
+                    round(100 * valores["no_prazo"] / validos, 1)
+                    if validos
+                    else None
+                ),
+                taxa_atraso=(
+                    round(100 * len(valores["atrasados"]) / validos, 1)
+                    if validos
+                    else None
+                ),
+                atraso_medio_normalizado_sla=(
+                    round(sum(amostras) / len(amostras), 4)
+                    if amostras
+                    else None
+                ),
+            )
+        )
+
+    medias = {
+        nome: sum(amostras) / len(amostras)
+        for nome, amostras in amostras_normalizadas.items()
+        if amostras
+    }
+
+    if medias:
+        melhor = min(medias, key=lambda nome: (medias[nome], nome))
+        pior = max(medias, key=lambda nome: (medias[nome], nome))
+        indice_equidade = round(
+            calcular_indice_equidade_sla(amostras_normalizadas), 4
+        )
+        diferenca = round(medias[pior] - medias[melhor], 4)
+    else:
+        melhor = pior = None
+        indice_equidade = diferenca = None
+
+    equidade = IndicadoresEquidadeTerritorial(
+        melhor_bairro=melhor,
+        atraso_normalizado_melhor_bairro=(
+            round(medias[melhor], 4) if melhor is not None else None
+        ),
+        pior_bairro=pior,
+        atraso_normalizado_pior_bairro=(
+            round(medias[pior], 4) if pior is not None else None
+        ),
+        diferenca_melhor_pior=diferenca,
+        indice_equidade_territorial_real=indice_equidade,
+        bairros_com_amostras_validas=len(medias),
+    )
+
+    return indicadores_bairro, equidade
+
+
 def _indicadores(simulacao, historico: _Historico, status) -> Indicadores:
     plano = simulacao.plano
     viagens = (
@@ -332,6 +547,12 @@ def _indicadores(simulacao, historico: _Historico, status) -> Indicadores:
 
     for valor in status.values():
         por_status[valor] += 1
+
+    por_bairro, equidade_territorial = _indicadores_territoriais(
+        simulacao,
+        historico,
+        status,
+    )
 
     return Indicadores(
         total_pedidos=len(status),
@@ -353,6 +574,8 @@ def _indicadores(simulacao, historico: _Historico, status) -> Indicadores:
         distancia_percorrida_m=sum(
             r.distancia_percorrida_m for r in resumos
         ),
+        por_bairro=por_bairro,
+        equidade_territorial=equidade_territorial,
     )
 
 

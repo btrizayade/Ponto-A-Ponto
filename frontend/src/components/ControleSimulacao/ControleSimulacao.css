@@ -43,6 +43,64 @@
   border-color: var(--cor-secundaria);
 }
 
+.inicio-simulacao {
+  flex-wrap: wrap;
+}
+
+.inicio-simulacao input {
+  min-width: 145px;
+  padding: 9px 10px;
+  border: 1px solid var(--cor-borda);
+  border-radius: 8px;
+  background: var(--cor-branco);
+  color: var(--cor-texto);
+  font: inherit;
+}
+
+.velocidade-simulacao {
+  margin-bottom: 16px;
+}
+
+.velocidade-simulacao label {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--cor-texto);
+}
+
+.velocidade-simulacao select {
+  min-width: 285px;
+  padding: 10px 12px;
+  border: 1px solid var(--cor-borda);
+  border-radius: 8px;
+  background-color: var(--cor-branco);
+  color: var(--cor-texto);
+  outline: none;
+  cursor: pointer;
+}
+
+.velocidade-simulacao select:focus {
+  border-color: var(--cor-secundaria);
+}
+
+.velocidade-simulacao select:disabled {
+  cursor: not-allowed;
+  background-color: var(--cor-fundo);
+}
+
+.inicio-simulacao .erro-inicio-simulacao,
+.inicio-simulacao .aviso-inicio-simulacao {
+  flex-basis: 100%;
+  font-size: 12px;
+}
+
+.erro-inicio-simulacao {
+  color: #b42318;
+}
+
+.aviso-inicio-simulacao {
+  color: #6941c6;
+}
+
 /* Botões */
 
 .botoes-controle {

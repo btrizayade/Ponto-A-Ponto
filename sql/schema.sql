@@ -71,6 +71,12 @@ CREATE TABLE IF NOT EXISTS pedidos (
             )
         ),
 
+    origem TEXT NOT NULL DEFAULT 'manual'
+        CHECK (origem IN ('referencia', 'manual')),
+
+    ativo INTEGER NOT NULL DEFAULT 1
+        CHECK (ativo IN (0, 1)),
+
     FOREIGN KEY (cenario_id)
         REFERENCES cenarios(id)
         ON DELETE CASCADE,
@@ -132,6 +138,24 @@ CREATE TABLE IF NOT EXISTS simulacoes (
     centro_nome TEXT NOT NULL,
     estrategia TEXT NOT NULL,
     entregadores TEXT NOT NULL,
+    parametros_json TEXT,
+    planejamento_status TEXT
+        CHECK (
+            planejamento_status IS NULL
+            OR planejamento_status IN (
+                'aguardando', 'planejando', 'concluido', 'falhou',
+                'interrompido'
+            )
+        ),
+    consultas_roteamento_contagem INTEGER
+        CHECK (
+            consultas_roteamento_contagem IS NULL
+            OR consultas_roteamento_contagem >= 0
+        ),
+    planejamento_erro TEXT,
+    segundos_reais_por_hora_simulada INTEGER NOT NULL DEFAULT 15
+        CHECK (segundos_reais_por_hora_simulada IN (5, 15, 30, 60)),
+    limite_pedido_manual_id INTEGER,
     status TEXT NOT NULL DEFAULT 'em_andamento'
         CHECK (status IN ('em_andamento', 'concluida')),
 
@@ -139,6 +163,94 @@ CREATE TABLE IF NOT EXISTS simulacoes (
         REFERENCES cenarios(id)
         ON DELETE SET NULL
 );
+
+CREATE TABLE IF NOT EXISTS simulacao_pedidos_snapshot (
+    simulacao_id INTEGER PRIMARY KEY,
+    versao INTEGER NOT NULL CHECK (versao > 0),
+    dados_json TEXT NOT NULL,
+
+    FOREIGN KEY (simulacao_id)
+        REFERENCES simulacoes(id)
+        ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS respostas_roteamento (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    tipo TEXT NOT NULL CHECK (tipo IN ('matriz', 'rota')),
+    versao INTEGER NOT NULL CHECK (versao > 0),
+    hash_sha256 TEXT NOT NULL UNIQUE,
+    dados_json TEXT NOT NULL,
+    criada_em TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS consultas_roteamento_simulacao (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    simulacao_id INTEGER NOT NULL,
+    sequencia INTEGER NOT NULL CHECK (sequencia > 0),
+    tipo TEXT NOT NULL CHECK (tipo IN ('matriz', 'rota')),
+    provedor TEXT NOT NULL,
+    perfil TEXT NOT NULL,
+    origem_resultado TEXT NOT NULL
+        CHECK (origem_resultado IN ('provedor', 'cache', 'misto', 'desconhecido')),
+    partida_em TEXT,
+    consultada_em TEXT NOT NULL,
+    requisicao_json TEXT NOT NULL,
+    resposta_id INTEGER NOT NULL,
+
+    FOREIGN KEY (simulacao_id)
+        REFERENCES simulacoes(id)
+        ON DELETE CASCADE,
+    FOREIGN KEY (resposta_id)
+        REFERENCES respostas_roteamento(id)
+        ON DELETE RESTRICT,
+    UNIQUE (simulacao_id, sequencia)
+);
+
+CREATE INDEX IF NOT EXISTS idx_consultas_roteamento_simulacao
+    ON consultas_roteamento_simulacao (simulacao_id, sequencia);
+
+CREATE TRIGGER IF NOT EXISTS trg_simulacao_pedidos_snapshot_immutable
+BEFORE UPDATE ON simulacao_pedidos_snapshot
+BEGIN
+    SELECT RAISE(ABORT, 'O snapshot de pedidos e imutavel.');
+END;
+
+CREATE TRIGGER IF NOT EXISTS trg_simulacoes_parametros_immutable
+BEFORE UPDATE OF parametros_json ON simulacoes
+WHEN OLD.parametros_json IS NOT NEW.parametros_json
+BEGIN
+    SELECT RAISE(ABORT, 'Os parametros experimentais sao imutaveis.');
+END;
+
+CREATE TRIGGER IF NOT EXISTS trg_simulacao_pedidos_snapshot_no_delete
+BEFORE DELETE ON simulacao_pedidos_snapshot
+WHEN EXISTS (
+    SELECT 1 FROM simulacoes WHERE id = OLD.simulacao_id
+)
+BEGIN
+    SELECT RAISE(ABORT, 'O snapshot so pode ser removido com a simulacao.');
+END;
+
+CREATE TRIGGER IF NOT EXISTS trg_respostas_roteamento_immutable
+BEFORE UPDATE ON respostas_roteamento
+BEGIN
+    SELECT RAISE(ABORT, 'A resposta de roteamento e imutavel.');
+END;
+
+CREATE TRIGGER IF NOT EXISTS trg_consultas_roteamento_immutable
+BEFORE UPDATE ON consultas_roteamento_simulacao
+BEGIN
+    SELECT RAISE(ABORT, 'A consulta de roteamento e imutavel.');
+END;
+
+CREATE TRIGGER IF NOT EXISTS trg_consultas_roteamento_no_delete
+BEFORE DELETE ON consultas_roteamento_simulacao
+WHEN EXISTS (
+    SELECT 1 FROM simulacoes WHERE id = OLD.simulacao_id
+)
+BEGIN
+    SELECT RAISE(ABORT, 'A consulta so pode ser removida com a simulacao.');
+END;
 
 CREATE TABLE IF NOT EXISTS eventos_simulacao (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -181,6 +293,24 @@ CREATE INDEX IF NOT EXISTS idx_eventos_simulacao_pedido
 
 CREATE INDEX IF NOT EXISTS idx_eventos_simulacao_entregador
     ON eventos_simulacao (simulacao_id, entregador_codigo);
+
+CREATE TRIGGER IF NOT EXISTS trg_eventos_simulacao_no_delete
+BEFORE DELETE ON eventos_simulacao
+WHEN EXISTS (
+    SELECT 1 FROM simulacoes WHERE id = OLD.simulacao_id
+)
+BEGIN
+    SELECT RAISE(ABORT, 'Eventos de simulacoes existentes sao imutaveis.');
+END;
+
+CREATE TRIGGER IF NOT EXISTS trg_simulacoes_no_delete_com_eventos
+BEFORE DELETE ON simulacoes
+WHEN EXISTS (
+    SELECT 1 FROM eventos_simulacao WHERE simulacao_id = OLD.id
+)
+BEGIN
+    SELECT RAISE(ABORT, 'Simulacoes com eventos nao podem ser excluidas.');
+END;
 
 CREATE TABLE IF NOT EXISTS mudancas_status_pedido (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
