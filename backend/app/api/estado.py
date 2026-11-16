@@ -166,13 +166,13 @@ def montar_estado(ativa: SimulacaoAtiva) -> EstadoSimulacao:
     for pedido in simulacao.pedidos:
         resumo = historico.pedidos[pedido.codigo]
         parada, viagem = paradas.get(pedido.codigo, (None, None))
-        # Sem previsao se ja entregue, devolvido a fila ou se a viagem
-        # sairia depois do expediente (sera cancelada).
+        # A previsao continua representando o plano depois da entrega; sem
+        # previsao se nao houver parada, entregador ou se a viagem sairia
+        # depois do expediente (sera cancelada).
         previsao = (
             parada.saida_em
             if parada
             and resumo.entregador_codigo
-            and resumo.entregue_em is None
             and viagem.partida_em <= simulacao.fim_expediente
             else None
         )

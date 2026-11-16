@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -47,6 +47,17 @@ class Expediente(BaseModel):
     fim: str
 
 
+class JanelaCriacaoCenario(BaseModel):
+    inicio: date
+    fim: date
+
+
+class TemporalidadeCenarioResposta(BaseModel):
+    janela_criacao: JanelaCriacaoCenario
+    inicio_simulacao: datetime
+    fuso_horario: str
+
+
 class Configuracao(BaseModel):
     """Valores padrao e opcoes para criar uma simulacao."""
 
@@ -68,6 +79,7 @@ class CenarioResposta(BaseModel):
     nome: str
     descricao: str
     quantidade_pedidos: int
+    temporalidade: TemporalidadeCenarioResposta | None
 
 
 class PedidoResposta(BaseModel):
@@ -91,6 +103,7 @@ class NovoPedido(BaseModel):
 
     cenario_id: int = Field(gt=0)
     bairro_id: int = Field(gt=0)
+    data_criacao: date
     categoria_produto: CategoriaProduto
     modalidade: ModalidadeEntrega
 
@@ -109,12 +122,18 @@ class NovaSimulacao(BaseModel):
     """
     Dados para criar uma simulacao.
 
-    Um inicio sem fuso horario e interpretado no horario de Salvador.
-    Os campos omitidos usam a configuracao do backend/.env.
+    ``inicio`` é legado e ignorado; o backend usa a data e o horário oficiais
+    do cenário. O campo será removido após a atualização dos clientes antigos.
     """
 
     cenario_id: int
-    inicio: datetime
+    inicio: datetime | None = Field(
+        default=None,
+        deprecated=True,
+        description=(
+            "Legado: ignorado. O início efetivo é determinado pelo cenário."
+        ),
+    )
     quantidade_entregadores: int | None = Field(
         default=None, ge=1, le=MAX_ENTREGADORES
     )

@@ -10,21 +10,25 @@ import {
 } from 'lucide-react'
 
 import { buscarPedidos } from '../../services/api'
-import { combinarPedidosDaSimulacao } from './pedidosVisiveis'
+import { obterPedidosExibidos } from './pedidosVisiveis'
 import {
   formatarInicioSelecionado,
-  obterTemposPedido
+  obterTemposPedido,
+  rotuloCriacaoPedido
 } from './pedidoTemporal'
 import './FilaPedidos.css'
 
-function TemposPedido({ pedido, simulacaoAtiva }) {
+function TemposPedido({ pedido, simulacaoAtiva, dadosOperacionais }) {
   const tempos = obterTemposPedido(pedido)
 
   return (
     <div className="pedido-tempos">
       <div>
         <Clock size={15} />
-        <span>Pedido criado: <strong>{tempos.criadoEm || 'Não informado'}</strong></span>
+        <span>
+          {rotuloCriacaoPedido(dadosOperacionais)}{' '}
+          <strong>{tempos.criadoEm || 'Não informado'}</strong>
+        </span>
       </div>
       <div>
         <Clock size={15} />
@@ -65,7 +69,6 @@ function FilaPedidos({
 
   // Verifica se a simulação já foi iniciada
   const simulacaoIniciada = Boolean(simulacao?.iniciada)
-  const simulacaoConcluida = simulacao?.estado_execucao === 'concluida'
   const cenarioPedidos = cenarioExibicao || cenarioSelecionado
   const simulacaoDaLista = simulacaoIniciada &&
     simulacao?.cenario_id === Number(cenarioPedidos)
@@ -73,13 +76,11 @@ function FilaPedidos({
   // Usa os pedidos atualizados da simulação quando ela estiver iniciada
   const pedidosDaSimulacao = simulacao?.pedidos || []
   const simulacaoDoCenario = simulacao?.cenario_id === Number(cenarioPedidos)
-  const pedidosExibidos = simulacaoDoCenario && simulacaoConcluida
-    ? pedidos
-    : simulacaoDoCenario
-    ? combinarPedidosDaSimulacao(pedidosDaSimulacao, pedidos)
-    : simulacaoDaLista
-      ? pedidosDaSimulacao
-      : pedidos
+  const pedidosExibidos = obterPedidosExibidos({
+    pedidosDaSimulacao,
+    pedidosPersistidos: pedidos,
+    simulacaoDoCenario
+  })
 
   // Organiza pela posição somente durante a simulação
   const pedidosOrdenados = simulacaoDaLista
@@ -158,7 +159,7 @@ function FilaPedidos({
           </p>
           {inicioSelecionadoTexto && (
             <p className="fila-inicio-simulado">
-              Início operacional selecionado: <strong>{inicioSelecionadoTexto}</strong>
+              Início operacional fixo do cenário: <strong>{inicioSimuladoSelecionado?.texto || inicioSelecionadoTexto}</strong>
             </p>
           )}
           {simulacaoDaLista && inicioSimulacaoTexto && (
@@ -235,6 +236,7 @@ function FilaPedidos({
             <TemposPedido
               pedido={pedido}
               simulacaoAtiva={simulacaoDaLista}
+              dadosOperacionais={simulacaoDoCenario}
             />
 
           </div>

@@ -3,7 +3,8 @@ import { test } from 'node:test'
 
 import {
   formatarInicioSelecionado,
-  obterTemposPedido
+  obterTemposPedido,
+  rotuloCriacaoPedido
 } from './pedidoTemporal.js'
 
 const pedidoBase = {
@@ -22,6 +23,8 @@ test('mantém datas históricas e exibe o início operacional selecionado', () =
   assert.equal(tempos.previsaoEntrega, null)
   assert.equal(formatarInicioSelecionado({ data: '2026-10-30', hora: '11:30' }),
     '30/10/2026, 11:30')
+  assert.equal(rotuloCriacaoPedido(false), 'Data histórica de criação:')
+  assert.equal(rotuloCriacaoPedido(true), 'Data efetiva de criação na operação:')
 })
 
 test('separa previsão do plano, entrega real e última atualização', () => {

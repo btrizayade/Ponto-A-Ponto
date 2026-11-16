@@ -110,21 +110,36 @@ valores válidos do backend e alimentam o formulário de novo pedido.
     "codigo": "NORMAL",
     "nome": "Operacao normal",
     "descricao": "Condicoes normais de transito e 10 pedidos predefinidos para simulacao.",
-    "quantidade_pedidos": 10
+    "quantidade_pedidos": 10,
+    "temporalidade": {
+      "janela_criacao": { "inicio": "2026-10-05", "fim": "2026-10-07" },
+      "inicio_simulacao": "2026-10-07T09:00:00-03:00",
+      "fuso_horario": "America/Bahia"
+    }
   },
   {
     "id": 2,
     "codigo": "ALTA_DEMANDA",
     "nome": "Alta Demanda e Trânsito Intenso",
     "descricao": "24 pedidos próprios, distribuídos em 3 pedidos por bairro nos oito bairros atendidos.",
-    "quantidade_pedidos": 24
+    "quantidade_pedidos": 24,
+    "temporalidade": {
+      "janela_criacao": { "inicio": "2026-10-26", "fim": "2026-10-30" },
+      "inicio_simulacao": "2026-10-30T09:00:00-03:00",
+      "fuso_horario": "America/Bahia"
+    }
   },
   {
     "id": 3,
     "codigo": "EQUIDADE",
     "nome": "Distribuição com Equidade",
     "descricao": "15 pedidos próprios, distribuídos de forma equilibrada pelos oito bairros atendidos.",
-    "quantidade_pedidos": 15
+    "quantidade_pedidos": 15,
+    "temporalidade": {
+      "janela_criacao": { "inicio": "2026-10-12", "fim": "2026-10-16" },
+      "inicio_simulacao": "2026-10-16T09:00:00-03:00",
+      "fuso_horario": "America/Bahia"
+    }
   }
 ]
 ```
@@ -151,13 +166,14 @@ formulário usa esta resposta e não mantém uma cópia local da lista.
 
 #### `POST /api/pedidos`
 
-Cria um pedido associado somente ao cenário informado. Os quatro campos do
-formulário são os únicos enviados pelo frontend:
+Cria um pedido associado somente ao cenário informado. O formulário envia os
+cinco campos abaixo, incluindo a data de criação escolhida pelo usuário:
 
 ```json
 {
   "cenario_id": 3,
   "bairro_id": 2,
+  "data_criacao": "2026-10-15",
   "categoria_produto": "medicamento",
   "modalidade": "entrega_rapida"
 }
@@ -165,9 +181,11 @@ formulário são os únicos enviados pelo frontend:
 
 `cenario_id` e `bairro_id` são IDs obtidos da API. A categoria deve ser um dos
 valores de `GET /api/configuracao`; `modalidade` é `entrega_rapida`, `clube`
-ou `convencional`.
-O backend gera um código `PED-MAN-...`, a data de criação no fuso de Salvador,
-o SLA, o prazo calculado pelas regras de expediente e os dados de peso, volume
+ou `convencional`. O backend valida que a data está na janela inclusiva do
+cenário, é dia útil e não é posterior ao início da simulação. O horário não é
+recebido do cliente: fica fixado em 09:00 no fuso `America/Bahia`. O backend
+gera um código `PED-MAN-...`, calcula SLA e prazo pelas regras de expediente e
+define os dados de peso, volume
 e serviço por categoria. Os perfis operacionais reutilizam combinações dos
 pedidos de referência: alimento (2,5 kg, 5 L, 8 min), medicamento (1,2 kg,
 2 L, 7 min), roupa (1 kg, 4 L, 5 min), eletrônico (3 kg, 8 L, 10 min) e outro
@@ -196,8 +214,8 @@ são gerados pelo backend e variam por cadastro):
   "cliente_clube": false,
   "entrega_rapida": true,
   "sla_dias_uteis": 1,
-  "criado_em": "2026-11-12T19:29:00.528613-03:00",
-  "prazo_entrega_em": "2026-11-13T17:00:00-03:00",
+  "criado_em": "2026-10-15T09:00:00-03:00",
+  "prazo_entrega_em": "2026-10-15T17:00:00-03:00",
   "peso_kg": 1.2,
   "volume_l": 2.0,
   "tempo_servico_min": 7,
@@ -225,7 +243,6 @@ a confirmação do cadastro.
 ```json
 {
   "cenario_id": 1,
-  "inicio": "2026-10-30T10:00:00",
   "quantidade_entregadores": 2,
   "estrategia": "insercao_mais_barata",
   "segundos_reais_por_hora_simulada": 15,
@@ -233,7 +250,10 @@ a confirmação do cadastro.
 }
 ```
 
-Só `cenario_id` e `inicio` são obrigatórios. Os outros campos usam a configuração do backend quando omitidos. A velocidade aceita somente `5`, `15`, `30` ou `60`; quando omitida, usa `15`.
+Somente `cenario_id` é obrigatório. O início é determinado automaticamente
+pelo código do cenário e não pode ser escolhido nesta API. Os demais campos
+usam a configuração do backend quando omitidos. A velocidade aceita somente
+`5`, `15`, `30` ou `60`; quando omitida, usa `15`.
 
 Use o `id` obtido em `GET /api/cenarios`. Com `estrategia` omitida,
 `NORMAL` usa `insercao_mais_barata`, `ALTA_DEMANDA` força roteamento simulado
@@ -241,24 +261,31 @@ com fator 2.0, e `EQUIDADE` usa `equidade_sla`. A criação inicia a execução
 automática; não é necessário chamar outro endpoint para iniciar o motor. As três
 estratégias também podem ser escolhidas explicitamente pelo campo `estrategia`.
 
-O `inicio` representa o relógio simulado, não o relógio real do computador.
-O controle do frontend permite selecionar data e horário e sugere um início
-posterior à criação mais recente dos pedidos daquele cenário. O valor enviado
-é `YYYY-MM-DDTHH:mm:ss`, sem offset; a API interpreta esse horário local em
-`America/Bahia` e devolve os estados com o offset correspondente. Assim, por
-exemplo, `2026-10-30T10:00:00` é interpretado como
-`2026-10-30T10:00:00-03:00`.
+`GET /api/cenarios` retorna a `temporalidade` oficial de cada cenário:
+`janela_criacao`, `inicio_simulacao` e `fuso_horario`. Para NORMAL, o início é
+`2026-10-07T09:00:00-03:00`; para EQUIDADE,
+`2026-10-16T09:00:00-03:00`; para ALTA_DEMANDA,
+`2026-10-30T09:00:00-03:00`. O backend valida o início configurado contra as
+regras de dia útil e expediente antes de criar a simulação.
 
-O `inicio` deve cair em um **dia útil, entre 09:00 inclusive e 17:00 exclusive**
-(horário de Salvador). Caso contrário, a resposta é `400`. O frontend mostra a
-validação antes do envio e o backend continua aplicando a mesma validação.
+O campo `inicio` de clientes antigos ainda é aceito temporariamente, mas está
+obsoleto e ignorado: não altera o início efetivo. Ele será removido após a
+atualização desses clientes. O frontend deve consultar `GET /api/cenarios` e
+exibir o início correspondente ao cenário selecionado.
 
-Todos os pedidos recuperados para o cenário formam o snapshot inicial da
-operação e entram no planejamento, mesmo quando `criado_em` for anterior ou
-posterior à data escolhida. `criado_em` e `prazo_entrega_em` continuam sendo os
-valores históricos persistidos; a data de início define o relógio da operação
-e o expediente usado para autorizar partidas. Um cenário sem pedidos retorna
-erro de validação, em vez de criar uma simulação vazia.
+Pedidos de referência ativos recebem datas efetivas determinísticas do
+manifesto temporal de cada cenário e prazos recalculados pela função SLA
+existente. Pedidos manuais mantêm as datas informadas no cadastro. Registros
+SQLite e suas datas históricas não são alterados. Pedidos manuais legados cuja
+criação esteja no futuro do início simulado ficam fora do snapshot. O motor e
+os indicadores utilizam as datas efetivas. Um cenário sem pedidos elegíveis
+retorna erro de validação, em vez de criar uma simulação vazia.
+
+O calendário distribui `PED-001` a `PED-010` de NORMAL entre 05 e 06/10;
+`EQ-001` a `EQ-015` de EQUIDADE entre 12 e 15/10; e `ALTA-001` a `ALTA-024`
+de ALTA_DEMANDA entre 26 e 29/10. Cada conjunto ocupa blocos às 09:00 e 13:00
+em dias úteis anteriores ao início fixo. A associação é feita por código do
+pedido e não depende da ordem retornada pelo repositório.
 
 Devolve `201` com o estado da simulação (ver [Estado](#estado-da-simulação)) e agenda um executor em segundo plano. O estado operacional passa a `executando`; a primeira etapa monta a fila e planeja as viagens. A resposta de criação pode chegar antes dessa primeira etapa.
 
@@ -336,8 +363,16 @@ Exemplo resumido de resposta:
   "snapshot_pedidos": {
     "versao": 1,
     "dados": {
-      "versao": 1,
+      "versao": 2,
       "cenario": { "id": 2, "codigo": "ALTA_DEMANDA", "nome": "Alta Demanda e Trânsito Intenso", "descricao": "…" },
+      "temporalidade": {
+        "versao_configuracao": 1,
+        "versao_regra_pedidos": 1,
+        "janela_criacao": { "inicio": "2026-10-26", "fim": "2026-10-30" },
+        "inicio_simulacao_configurado": "2026-10-30T09:00:00-03:00",
+        "inicio_simulacao_utilizado": "2026-10-30T09:00:00-03:00",
+        "fuso_horario": "America/Bahia"
+      },
       "pedidos": [
         {
           "id": 25,
@@ -347,8 +382,16 @@ Exemplo resumido de resposta:
           "cliente_clube": true,
           "entrega_rapida": true,
           "sla_dias_uteis": 1,
-          "criado_em": "2026-10-30T09:00:00-03:00",
-          "prazo_entrega_em": "2026-10-30T17:00:00-03:00",
+          "criado_em": "2026-10-26T09:00:00-03:00",
+          "prazo_entrega_em": "2026-10-26T17:00:00-03:00",
+          "datas_historicas": {
+            "criado_em": "2026-10-30T09:00:00-03:00",
+            "prazo_entrega_em": "2026-10-30T17:00:00-03:00"
+          },
+          "datas_efetivas": {
+            "criado_em": "2026-10-26T09:00:00-03:00",
+            "prazo_entrega_em": "2026-10-26T17:00:00-03:00"
+          },
           "peso_kg": 1.2,
           "volume_l": 2.0,
           "tempo_servico_min": 7,
@@ -736,8 +779,8 @@ Resposta de `GET /api/simulacoes/{id}` e campo `estado` dos endpoints de control
 | `fila` | Códigos dos pedidos com status `na_fila`, na ordem em que seriam atendidos |
 | `pedidos[].posicao_fila` e `prioridade` | Posição e pontuação de prioridade usadas no planejamento; `null` antes do planejamento ou quando não houve atribuição |
 | `pedidos[].previsao_entrega_em` | Quando a entrega deve ser concluída, pelo plano; `null` se já foi entregue, se voltou para a fila ou se a viagem sairia depois das 17h |
-| `pedidos[].criado_em` | Data original de criação, preservada do pedido cadastrado. |
-| `pedidos[].prazo_entrega_em` | Prazo original do SLA, calculado no cadastro e não reescrito pela simulação. |
+| `pedidos[].criado_em` | Data efetiva usada pelo motor; referências usam o calendário temporal e pedidos manuais usam a data do cadastro. |
+| `pedidos[].prazo_entrega_em` | Prazo efetivo usado pelo motor e calculado pela função SLA existente. O snapshot mantém os valores originais em `datas_historicas`. |
 | `pedidos[].entregue_em` | Instante do evento real de entrega no relógio simulado; `null` até a entrega. |
 | `pedidos[].atualizado_em` | Instante do evento mais recente registrado para o pedido; `null` antes de entrar na simulação. |
 | `pedidos[].atraso_min` | Minutos de atraso na conclusão (0 se no prazo); preenchido após a entrega |

@@ -24,6 +24,9 @@ from app.domain.distribution import (
     DistribuicaoOrdemDaFila,
 )
 from app.domain.routing import ErroRoteamento
+from app.domain.configuracao_temporal import (
+    obter_configuracao_temporal_cenario,
+)
 from app.domain.sla import FUSO_HORARIO
 from app.domain.simulation import EstadoExecucao
 from app.infrastructure.auditoria_experimental import (
@@ -118,6 +121,13 @@ async def criar(dados: NovaSimulacao, request: Request):
                 404, f"Cenario {dados.cenario_id} nao encontrado."
             )
 
+        temporalidade = obter_configuracao_temporal_cenario(cenario.codigo)
+        if temporalidade is None:
+            raise HTTPException(
+                400,
+                f"O cenário {cenario.codigo} não possui configuração temporal.",
+            )
+
         fator_transito = None
 
         if cenario.codigo == "ALTA_DEMANDA":
@@ -140,7 +150,10 @@ async def criar(dados: NovaSimulacao, request: Request):
             estrategia = "equidade_sla"
         else:
             estrategia = ESTRATEGIA_PADRAO
-        inicio = _com_fuso(dados.inicio)
+        # O início efetivo é definido pelo calendário backend do cenário.
+        # O campo recebido continua opcional para clientes antigos, mas não
+        # pode substituir a configuração oficial.
+        inicio = temporalidade.inicio_simulacao
 
         try:
             simulacao, auditoria = criar_simulacao_auditada(

@@ -33,8 +33,9 @@ def criar_pedido_do_formulario(
     bairro: Bairro,
     categoria: CategoriaProduto,
     modalidade: ModalidadeEntrega,
+    criado_em: datetime | None = None,
 ) -> Pedido:
-    """Gera código e dados operacionais sem exigir campos técnicos no UI."""
+    """Gera dados operacionais; a API pode fornecer a data validada."""
 
     peso_kg, volume_l, tempo_servico_min = PERFIL_CATEGORIA[categoria]
     entrega_rapida = modalidade == ModalidadeEntrega.ENTREGA_RAPIDA
@@ -47,7 +48,7 @@ def criar_pedido_do_formulario(
         cliente_clube=cliente_clube,
         entrega_rapida=entrega_rapida,
         sla_dias_uteis=SLA_MODALIDADE_DIAS_UTEIS[modalidade],
-        criado_em=datetime.now(FUSO_HORARIO),
+        criado_em=criado_em or datetime.now(FUSO_HORARIO),
         peso_kg=peso_kg,
         volume_l=volume_l,
         tempo_servico_min=tempo_servico_min,

@@ -1,3 +1,4 @@
+from dataclasses import replace
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
@@ -14,6 +15,7 @@ from app.domain.simulation import (
     TipoEvento as T,
 )
 from app.api.registro import SimulacaoAtiva
+from app.api.estado import montar_estado
 from app.infrastructure.auditoria_repository import AuditoriaSimulacao
 from app.infrastructure.execucao_automatica import sincronizar_relogio
 from app.infrastructure.simulated_routing import ServicoRoteamentoSimulado
@@ -424,6 +426,85 @@ def test_viagem_que_sairia_depois_das_17h_e_cancelada():
         for p in PEDIDOS
         if p.codigo not in devolvidos
     )
+
+
+def test_pedidos_sem_entrega_planejada_continuam_sem_previsao_no_estado(
+    monkeypatch,
+):
+    inicio = INICIO.replace(hour=16, minute=30)
+    entregador = Entregador("CAM-01", max_paradas_por_viagem=1)
+    simulacao = criar_simulacao(
+        PEDIDOS,
+        inicio=inicio,
+        entregadores=[entregador],
+    )
+    simulacao.executar_ate_o_fim()
+    monkeypatch.setattr("app.api.estado.listar_bairros", lambda: [])
+
+    ativa = SimulacaoAtiva(
+        simulacao=simulacao,
+        auditoria=AuditoriaSimulacao(999),
+        cenario_id=1,
+        inicio=inicio,
+        provedor="simulado",
+        estrategia="insercao_mais_barata",
+    )
+    estado = montar_estado(ativa)
+    codigos_devolvidos = {
+        evento.pedido_codigo
+        for evento in simulacao.historico
+        if evento.tipo == T.PEDIDO_DEVOLVIDO_A_FILA
+    }
+    pedidos_devolvidos = [
+        pedido for pedido in estado.pedidos
+        if pedido.codigo in codigos_devolvidos
+    ]
+
+    assert pedidos_devolvidos
+    assert all(pedido.status == S.NA_FILA for pedido in pedidos_devolvidos)
+    assert all(
+        pedido.previsao_entrega_em is None
+        for pedido in pedidos_devolvidos
+    )
+
+
+def test_previsao_e_entrega_efetiva_sao_projetadas_independentemente(
+    monkeypatch,
+):
+    pedido = criar_pedido("P1", BARRA)
+    simulacao = criar_simulacao([pedido], entregadores=[Entregador("CAM-01")])
+    simulacao.iniciar()
+    parada = simulacao.plano.paradas[0]
+    simulacao.avancar_ate(parada.saida_em)
+    evento_entrega = next(
+        evento for evento in simulacao._historico
+        if evento.tipo == T.PEDIDO_ENTREGUE
+    )
+    instante_evento = evento_entrega.instante + timedelta(minutes=1)
+    simulacao._historico = [
+        replace(evento, instante=instante_evento)
+        if evento.tipo == T.PEDIDO_ENTREGUE
+        else evento
+        for evento in simulacao._historico
+    ]
+    monkeypatch.setattr("app.api.estado.listar_bairros", lambda: [])
+
+    ativa = SimulacaoAtiva(
+        simulacao=simulacao,
+        auditoria=AuditoriaSimulacao(999),
+        cenario_id=1,
+        inicio=INICIO,
+        provedor="simulado",
+        estrategia="insercao_mais_barata",
+    )
+    pedido_estado = next(
+        item for item in montar_estado(ativa).pedidos
+        if item.codigo == pedido.codigo
+    )
+
+    assert pedido_estado.previsao_entrega_em == parada.saida_em
+    assert pedido_estado.entregue_em == instante_evento
+    assert pedido_estado.entregue_em != pedido_estado.previsao_entrega_em
 
 
 def test_viagem_iniciada_ate_17h_pode_terminar_depois():

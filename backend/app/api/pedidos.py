@@ -4,6 +4,10 @@ from app.api.estado import pedido_resposta
 from app.api.schemas import BairroResposta, NovoPedido, PedidoCriado
 from app.domain.priority_scoring import calcular_prioridade
 from app.domain.models import OrigemPedido
+from app.domain.alinhamento_temporal_pedidos import (
+    validar_data_criacao_manual,
+)
+from app.domain.configuracao_temporal import obter_configuracao_temporal_cenario
 from app.infrastructure.bairro_repository import listar_bairros
 from app.infrastructure.cenario_repository import obter_cenario
 from app.infrastructure.pedido_factory import criar_pedido_do_formulario
@@ -28,6 +32,23 @@ def criar(dados: NovoPedido):
     if cenario is None:
         raise HTTPException(404, f"Cenario {dados.cenario_id} nao encontrado.")
 
+    configuracao_temporal = obter_configuracao_temporal_cenario(
+        cenario.codigo
+    )
+    if configuracao_temporal is None:
+        raise HTTPException(
+            400,
+            f"O cenário {cenario.codigo} não possui janela temporal de cadastro.",
+        )
+
+    try:
+        criado_em = validar_data_criacao_manual(
+            configuracao_temporal,
+            dados.data_criacao,
+        )
+    except ValueError as erro:
+        raise HTTPException(400, str(erro)) from erro
+
     bairro = next(
         (item for item in listar_bairros() if item.id == dados.bairro_id),
         None,
@@ -39,6 +60,7 @@ def criar(dados: NovoPedido):
         bairro,
         dados.categoria_produto,
         dados.modalidade,
+        criado_em=criado_em,
     )
 
     try:

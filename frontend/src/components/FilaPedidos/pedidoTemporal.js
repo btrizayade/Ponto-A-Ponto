@@ -32,3 +32,9 @@ export function obterTemposPedido(pedido) {
     atualizadoEm: formatarInstanteSalvador(pedido.atualizado_em)
   }
 }
+
+export function rotuloCriacaoPedido(dadosOperacionais) {
+  return dadosOperacionais
+    ? 'Data efetiva de criação na operação:'
+    : 'Data histórica de criação:'
+}

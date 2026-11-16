@@ -417,23 +417,56 @@ class AuditoriaSimulacao:
                     """,
                     (instante, self.simulacao_id),
                 )
-                conexao.execute(
+                snapshot = conexao.execute(
                     """
-                    UPDATE pedidos
-                    SET ativo = 0
-                    WHERE cenario_id = (
-                        SELECT cenario_id FROM simulacoes WHERE id = ?
-                    )
-                      AND origem = 'manual'
-                      AND ativo = 1
-                      AND id <= COALESCE(
-                          (SELECT limite_pedido_manual_id
-                           FROM simulacoes WHERE id = ?),
-                          -1
-                      )
+                    SELECT dados_json
+                    FROM simulacao_pedidos_snapshot
+                    WHERE simulacao_id = ?
                     """,
-                    (self.simulacao_id, self.simulacao_id),
-                )
+                    (self.simulacao_id,),
+                ).fetchone()
+                if snapshot is None:
+                    # Bancos antigos sem snapshot não permitem determinar com
+                    # segurança quais pedidos participaram da execução.
+                    logger.warning(
+                        "Simulação %s concluída sem snapshot; "
+                        "nenhum pedido manual foi arquivado",
+                        self.simulacao_id,
+                    )
+                    ids_manuais_snapshot: list[int] = []
+                else:
+                    try:
+                        dados_snapshot = json.loads(snapshot["dados_json"])
+                        pedidos_snapshot = dados_snapshot["pedidos"]
+                        ids_manuais_snapshot = [
+                            pedido["id"]
+                            for pedido in pedidos_snapshot
+                            if pedido.get("origem") == "manual"
+                            and isinstance(pedido.get("id"), int)
+                            and not isinstance(pedido.get("id"), bool)
+                        ]
+                    except (AttributeError, KeyError, TypeError, ValueError) as erro:
+                        raise FalhaPersistenciaAuditoriaExperimental(
+                            "Não foi possível identificar os pedidos manuais "
+                            "do snapshot da simulação "
+                            f"{self.simulacao_id}."
+                        ) from erro
+
+                if ids_manuais_snapshot:
+                    for pedido_id in ids_manuais_snapshot:
+                        conexao.execute(
+                            """
+                            UPDATE pedidos
+                            SET ativo = 0
+                            WHERE cenario_id = (
+                                SELECT cenario_id FROM simulacoes WHERE id = ?
+                            )
+                              AND origem = 'manual'
+                              AND ativo = 1
+                              AND id = ?
+                            """,
+                            (self.simulacao_id, pedido_id),
+                        )
 
     def descartar_criacao_sem_eventos(self) -> bool:
         """Remove o registro se o executor falhou antes do primeiro evento.

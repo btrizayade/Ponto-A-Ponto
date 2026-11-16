@@ -192,10 +192,11 @@ test('carrega cenários, bairros e opções diretamente dos endpoints da API', a
   ])
 })
 
-test('envia apenas cenário, bairro, categoria e modalidade ao cadastrar', async () => {
+test('envia cenário, bairro, data, categoria e modalidade ao cadastrar', async () => {
   const dados = {
     cenario_id: 3,
     bairro_id: 5,
+    data_criacao: '2026-10-16',
     categoria_produto: 'roupa',
     modalidade: 'clube'
   }
@@ -229,6 +230,7 @@ test('erro de cadastro preserva uma mensagem clara da API', async () => {
     criarPedido({
       cenario_id: 1,
       bairro_id: 999,
+      data_criacao: '2026-10-07',
       categoria_produto: 'roupa',
       modalidade: 'clube'
     }),

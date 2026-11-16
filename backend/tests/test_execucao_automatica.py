@@ -149,7 +149,7 @@ def test_inicio_selecionado_pelo_frontend_inicia_execucao_automatica(
     )
     assert resposta.status_code == 201, resposta.json()
     criada = resposta.json()
-    assert criada["inicio"] == "2026-10-30T16:59:00-03:00"
+    assert criada["inicio"] == "2026-10-07T09:00:00-03:00"
     assert criada["segundos_reais_por_hora_simulada"] == 60
     assert criada["estado_execucao"] == "executando"
 

@@ -8,3 +8,12 @@ export function combinarPedidosDaSimulacao(pedidosDaSimulacao, pedidosSalvos) {
 
   return [...pedidosDaSimulacao, ...pedidosProximaSimulacao]
 }
+
+export function obterPedidosExibidos({
+  pedidosDaSimulacao,
+  pedidosPersistidos,
+  simulacaoDoCenario
+}) {
+  if (!simulacaoDoCenario) return pedidosPersistidos
+  return combinarPedidosDaSimulacao(pedidosDaSimulacao, pedidosPersistidos)
+}

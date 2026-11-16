@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import date, datetime
 
 import pytest
 from fastapi.testclient import TestClient
@@ -9,6 +9,11 @@ from app.infrastructure.bairro_repository import listar_bairros
 from app.infrastructure.cenario_repository import listar_cenarios
 from app.infrastructure.pedido_repository import listar_pedidos_por_cenario
 from app.domain.models import OrigemPedido
+from app.domain.configuracao_temporal import ConfiguracaoTemporalCenario
+from app.domain.alinhamento_temporal_pedidos import (
+    validar_data_criacao_manual,
+)
+from app.domain.sla import FUSO_HORARIO
 from app.infrastructure.seed import inicializar_todos_cenarios
 from app.main import app
 
@@ -31,9 +36,15 @@ def cliente(tmp_path, monkeypatch):
 
 
 def payload(cliente, *, cenario="NORMAL", bairro=None, categoria="alimento", modalidade="entrega_rapida"):
+    data_por_cenario = {
+        "NORMAL": "2026-10-07",
+        "EQUIDADE": "2026-10-16",
+        "ALTA_DEMANDA": "2026-10-30",
+    }
     return {
         "cenario_id": cliente.cenarios[cenario],
         "bairro_id": bairro or next(iter(cliente.bairros)),
+        "data_criacao": data_por_cenario[cenario],
         "categoria_produto": categoria,
         "modalidade": modalidade,
     }
@@ -88,6 +99,7 @@ def test_pedido_e_persistido_somente_no_cenario_escolhido(cliente):
     assert pedido["sla_dias_uteis"] == 3
     assert pedido["prazo_entrega_em"] is not None
     assert pedido["criado_em"] is not None
+    assert pedido["criado_em"] == "2026-10-16T09:00:00-03:00"
     assert pedido["peso_kg"] == 2.5
     assert pedido["volume_l"] == 5.0
     assert pedido["tempo_servico_min"] == 8
@@ -190,6 +202,45 @@ def test_cenario_bairro_categoria_e_modalidade_invalidos_sao_rejeitados(cliente)
     invalido = payload(cliente)
     invalido["categoria_produto"] = "brinquedo"
     assert cliente.post("/api/pedidos", json=invalido).status_code == 422
+
+
+@pytest.mark.parametrize(
+    ("cenario", "data_criacao"),
+    [("NORMAL", "2026-10-04"), ("ALTA_DEMANDA", "2026-10-31")],
+)
+def test_data_manual_fora_da_janela_e_rejeitada(cliente, cenario, data_criacao):
+    dados = payload(cliente, cenario=cenario)
+    dados["data_criacao"] = data_criacao
+    resposta = cliente.post("/api/pedidos", json=dados)
+
+    assert resposta.status_code == 400
+    assert "janela do cenário" in resposta.json()["detail"]
+
+
+def test_validacao_manual_rejeita_fim_de_semana_e_data_posterior_ao_inicio():
+    configuracao = ConfiguracaoTemporalCenario(
+        codigo_cenario="TESTE",
+        data_inicial_janela=date(2026, 10, 5),
+        data_final_janela=date(2026, 10, 10),
+        inicio_simulacao=datetime(2026, 10, 7, 9, tzinfo=FUSO_HORARIO),
+        fuso_horario="America/Bahia",
+    )
+    with pytest.raises(ValueError, match="dia útil"):
+        validar_data_criacao_manual(configuracao, date(2026, 10, 10))
+    with pytest.raises(ValueError, match="posterior"):
+        validar_data_criacao_manual(configuracao, date(2026, 10, 8))
+
+
+def test_data_manual_obrigatoria(cliente):
+    dados = payload(cliente)
+    dados.pop("data_criacao")
+    assert cliente.post("/api/pedidos", json=dados).status_code == 422
+
+
+def test_data_manual_nao_aceita_horario_informado_pelo_cliente(cliente):
+    dados = payload(cliente)
+    dados["data_criacao"] = "2026-10-06T16:30:00-03:00"
+    assert cliente.post("/api/pedidos", json=dados).status_code == 422
 
     invalido = payload(cliente)
     invalido["modalidade"] = "normal"

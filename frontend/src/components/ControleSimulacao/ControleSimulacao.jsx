@@ -1,5 +1,5 @@
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 
 import {
   Play,
@@ -10,7 +10,6 @@ import {
 import {
   buscarCenarios,
   buscarConfiguracao,
-  buscarPedidos,
   criarSimulacao,
   pausarSimulacao,
   retomarSimulacao
@@ -18,17 +17,15 @@ import {
 
 import './ControleSimulacao.css'
 import {
-  criarInicioApi,
-  existemPedidosPosteriores,
-  sugerirInicioSimulado,
-  validarInicioSimulado
-} from './inicioSimulado'
-import {
   VELOCIDADES_SIMULACAO,
   VELOCIDADE_SIMULACAO_PADRAO,
   velocidadeBloqueada
 } from './velocidadeSimulacao'
-import { obterConfiguracaoBaseNovaSimulacao } from './configuracaoNovaSimulacao'
+import {
+  criarDadosCriacaoSimulacao,
+  obterConfiguracaoBaseNovaSimulacao,
+  obterInicioFixoCenario
+} from './configuracaoNovaSimulacao'
 
 function ControleSimulacao({
   cenarioSelecionado,
@@ -47,10 +44,6 @@ function ControleSimulacao({
   const [controlandoPausa, setControlandoPausa] = useState(false)
   const [quantidadeEntregadores, setQuantidadeEntregadores] = useState('2')
   const [quantidadeEntregadoresPadrao, setQuantidadeEntregadoresPadrao] = useState(2)
-  const [pedidosCenario, setPedidosCenario] = useState([])
-  const [carregandoPedidosCenario, setCarregandoPedidosCenario] = useState(false)
-  const [dataInicio, setDataInicio] = useState('')
-  const [horaInicio, setHoraInicio] = useState('')
   const [velocidadeSimulacao, setVelocidadeSimulacao] = useState(
     VELOCIDADE_SIMULACAO_PADRAO
   )
@@ -58,6 +51,14 @@ function ControleSimulacao({
   const pausada = estadoExecucao === 'pausada'
   const concluida = estadoExecucao === 'concluida'
   const simulacaoProtegida = ['executando', 'pausada'].includes(estadoExecucao)
+  const inicioCenario = useMemo(
+    () => obterInicioFixoCenario(cenarios, cenarioSelecionado),
+    [cenarios, cenarioSelecionado]
+  )
+
+  useEffect(() => {
+    aoAlterarInicio?.(inicioCenario)
+  }, [aoAlterarInicio, inicioCenario])
 
   // Busca os cenários quando o componente é carregado
   useEffect(() => {
@@ -88,51 +89,10 @@ function ControleSimulacao({
     carregarCenarios()
   }, [aoTrocarCenario])
 
-  useEffect(() => {
-    if (!cenarioSelecionado) return undefined
-
-    let desmontado = false
-
-    async function carregarPedidosCenario() {
-      try {
-        setCarregandoPedidosCenario(true)
-        const pedidos = await buscarPedidos(cenarioSelecionado)
-        if (desmontado) return
-
-        setPedidosCenario(pedidos)
-        const sugerido = sugerirInicioSimulado(pedidos)
-        setDataInicio(sugerido.data)
-        setHoraInicio(sugerido.hora)
-        aoAlterarInicio?.({ data: sugerido.data, hora: sugerido.hora })
-      } catch (falha) {
-        if (desmontado) return
-        setPedidosCenario([])
-        setErro(`Não foi possível conferir as datas dos pedidos: ${falha.message}`)
-      } finally {
-        if (!desmontado) setCarregandoPedidosCenario(false)
-      }
-    }
-
-    carregarPedidosCenario()
-    return () => {
-      desmontado = true
-    }
-  }, [cenarioSelecionado, aoAlterarInicio])
-
-  const erroInicio = dataInicio && horaInicio
-    ? validarInicioSimulado(dataInicio, horaInicio)
-    : ''
-  const haPedidosPosteriores = existemPedidosPosteriores(
-    pedidosCenario,
-    dataInicio,
-    horaInicio
-  )
-
   // Cria uma nova simulação
   async function iniciarSimulacao() {
-    const erroDataHora = validarInicioSimulado(dataInicio, horaInicio)
-    if (erroDataHora) {
-      setErro(erroDataHora)
+    if (!inicioCenario) {
+      setErro('O cenário selecionado não possui início temporal configurado.')
       return
     }
 
@@ -140,13 +100,11 @@ function ControleSimulacao({
       setCriando(true)
       setErro('')
 
-      const dados = await criarSimulacao({
-        cenario_id: Number(cenarioSelecionado),
-        inicio: criarInicioApi(dataInicio, horaInicio),
+      const dados = await criarSimulacao(criarDadosCriacaoSimulacao({
+        cenarioId: cenarioSelecionado,
         quantidade_entregadores: Number(quantidadeEntregadores),
-        provedor: 'simulado',
-        segundos_reais_por_hora_simulada: Number(velocidadeSimulacao)
-      })
+        segundosReaisPorHoraSimulada: Number(velocidadeSimulacao)
+      }))
 
       setIdSimulacao(dados.id)
       setSimulacao(dados)
@@ -172,15 +130,10 @@ function ControleSimulacao({
 
       const configuracao = await obterConfiguracaoBaseNovaSimulacao({
         cenarios,
-        buscarPedidos,
         quantidadeEntregadoresPadrao
       })
 
       aoTrocarCenario(configuracao.cenarioId)
-      setPedidosCenario(configuracao.pedidos)
-      setDataInicio(configuracao.inicio.data)
-      setHoraInicio(configuracao.inicio.hora)
-      aoAlterarInicio?.(configuracao.inicio)
       setQuantidadeEntregadores(configuracao.quantidadeEntregadores)
       setVelocidadeSimulacao(configuracao.velocidadeSimulacao)
       setIdSimulacao(null)
@@ -252,44 +205,10 @@ function ControleSimulacao({
       </div>
 
       <div className="selecao-cenario inicio-simulacao">
-        <label htmlFor="data-inicio-simulacao">Data simulada:</label>
-        <input
-          id="data-inicio-simulacao"
-          type="date"
-          value={dataInicio}
-          onChange={(evento) => {
-            const data = evento.target.value
-            setDataInicio(data)
-            aoAlterarInicio?.({ data, hora: horaInicio })
-            setErro('')
-          }}
-          disabled={carregandoPedidosCenario || criando || reiniciando || simulacaoProtegida}
-          required
-        />
-        <label htmlFor="hora-inicio-simulacao">Horário:</label>
-        <input
-          id="hora-inicio-simulacao"
-          type="time"
-          min="09:00"
-          max="16:59"
-          step="60"
-          value={horaInicio}
-          onChange={(evento) => {
-            const hora = evento.target.value
-            setHoraInicio(hora)
-            aoAlterarInicio?.({ data: dataInicio, hora })
-            setErro('')
-          }}
-          disabled={carregandoPedidosCenario || criando || reiniciando || simulacaoProtegida}
-          required
-        />
-        {carregandoPedidosCenario && <span>Conferindo os pedidos do cenário...</span>}
-        {erroInicio && <span className="erro-inicio-simulacao">{erroInicio}</span>}
-        {!erroInicio && haPedidosPosteriores && (
-          <span className="aviso-inicio-simulacao">
-            Há pedidos criados depois deste início; eles não participarão do plano desta execução.
-          </span>
-        )}
+        <span>Início fixo da simulação:</span>
+        <strong aria-live="polite">
+          {inicioCenario?.texto || 'Indisponível para este cenário'}
+        </strong>
       </div>
 
       <div className="selecao-cenario velocidade-simulacao">
@@ -343,12 +262,9 @@ function ControleSimulacao({
             criando ||
             reiniciando ||
             !cenarioSelecionado ||
+            !inicioCenario ||
             Boolean(idSimulacao) ||
-            simulacaoProtegida ||
-            carregandoPedidosCenario ||
-            !dataInicio ||
-            !horaInicio ||
-            Boolean(erroInicio)
+            simulacaoProtegida
           }
         >
           <Play size={18} />
@@ -380,11 +296,7 @@ function ControleSimulacao({
             !idSimulacao ||
             reiniciando ||
             criando ||
-            simulacaoProtegida ||
-            carregandoPedidosCenario ||
-            !dataInicio ||
-            !horaInicio ||
-            Boolean(erroInicio)
+            simulacaoProtegida
           }
         >
           <RotateCcw size={18} />

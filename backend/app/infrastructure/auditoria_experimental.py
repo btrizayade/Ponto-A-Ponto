@@ -24,7 +24,7 @@ from app.domain.routing import (
     ServicoRoteamento,
 )
 VERSAO_PARAMETROS = 1
-VERSAO_SNAPSHOT_PEDIDOS = 1
+VERSAO_SNAPSHOT_PEDIDOS = 2
 VERSAO_REQUISICAO_ROTEAMENTO = 1
 VERSAO_RESPOSTA_ROTEAMENTO = 1
 
@@ -46,8 +46,26 @@ def serializar_snapshot_pedidos(
     cenario: Cenario,
     pedidos: Sequence[Pedido],
     inicio: datetime,
+    *,
+    pedidos_historicos: Sequence[Pedido] | None = None,
+    metadados_temporais: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Copia os pedidos e bairros exatamente como carregados para a execucao."""
+    """Registra os dados persistidos e os efetivamente usados pelo motor."""
+
+    historicos = (
+        pedidos_historicos if pedidos_historicos is not None else pedidos
+    )
+    historicos_por_chave = {_chave_pedido(pedido): pedido for pedido in historicos}
+    chaves_efetivas = [_chave_pedido(pedido) for pedido in pedidos]
+    if len(chaves_efetivas) != len(set(chaves_efetivas)):
+        raise ValueError("O snapshot contém pedidos efetivos duplicados.")
+    if pedidos_historicos is not None and (
+        len(historicos_por_chave) != len(historicos)
+        or set(historicos_por_chave) != set(chaves_efetivas)
+    ):
+        raise ValueError(
+            "Os pedidos históricos e efetivos do snapshot não correspondem."
+        )
 
     return {
         "versao": VERSAO_SNAPSHOT_PEDIDOS,
@@ -57,34 +75,67 @@ def serializar_snapshot_pedidos(
             "nome": cenario.nome,
             "descricao": cenario.descricao,
         },
+        "temporalidade": dict(metadados_temporais or {}),
         "pedidos": [
-            {
-                "id": pedido.id,
-                "codigo": pedido.codigo,
-                "bairro": _serializar_bairro(pedido.bairro),
-                "categoria_produto": pedido.categoria_produto.value,
-                "cliente_clube": pedido.cliente_clube,
-                "entrega_rapida": pedido.entrega_rapida,
-                "sla_dias_uteis": pedido.sla_dias_uteis,
-                "criado_em": pedido.criado_em.isoformat(),
-                "prazo_entrega_em": (
-                    pedido.prazo_entrega_em.isoformat()
-                    if pedido.prazo_entrega_em is not None
-                    else None
-                ),
-                "peso_kg": pedido.peso_kg,
-                "volume_l": pedido.volume_l,
-                "tempo_servico_min": pedido.tempo_servico_min,
-                "status_inicial_motor": StatusPedido.PENDENTE.value,
-                "prioridade_inicial": calcular_prioridade(
-                    pedido,
-                    agora=inicio,
-                ),
-                "origem": pedido.origem.value,
-                "ativo": pedido.ativo,
-            }
+            _serializar_pedido_snapshot(
+                pedido,
+                historicos_por_chave.get(_chave_pedido(pedido), pedido),
+                inicio,
+            )
             for pedido in pedidos
         ],
+    }
+
+
+def _chave_pedido(pedido: Pedido) -> tuple[int | None, str]:
+    return pedido.id, pedido.codigo
+
+
+def _serializar_pedido_snapshot(
+    pedido: Pedido,
+    historico: Pedido,
+    inicio: datetime,
+) -> dict[str, Any]:
+    """Mantém as chaves v1 efetivas e adiciona a proveniência v2."""
+
+    criado_efetivo = pedido.criado_em.isoformat()
+    prazo_efetivo = (
+        pedido.prazo_entrega_em.isoformat()
+        if pedido.prazo_entrega_em is not None
+        else None
+    )
+    criado_historico = historico.criado_em.isoformat()
+    prazo_historico = (
+        historico.prazo_entrega_em.isoformat()
+        if historico.prazo_entrega_em is not None
+        else None
+    )
+    return {
+        "id": pedido.id,
+        "codigo": pedido.codigo,
+        "bairro": _serializar_bairro(pedido.bairro),
+        "categoria_produto": pedido.categoria_produto.value,
+        "cliente_clube": pedido.cliente_clube,
+        "entrega_rapida": pedido.entrega_rapida,
+        "sla_dias_uteis": pedido.sla_dias_uteis,
+        # As chaves originais do snapshot representam os dados efetivos.
+        "criado_em": criado_efetivo,
+        "prazo_entrega_em": prazo_efetivo,
+        "datas_historicas": {
+            "criado_em": criado_historico,
+            "prazo_entrega_em": prazo_historico,
+        },
+        "datas_efetivas": {
+            "criado_em": criado_efetivo,
+            "prazo_entrega_em": prazo_efetivo,
+        },
+        "peso_kg": pedido.peso_kg,
+        "volume_l": pedido.volume_l,
+        "tempo_servico_min": pedido.tempo_servico_min,
+        "status_inicial_motor": StatusPedido.PENDENTE.value,
+        "prioridade_inicial": calcular_prioridade(pedido, agora=inicio),
+        "origem": pedido.origem.value,
+        "ativo": pedido.ativo,
     }
 
 

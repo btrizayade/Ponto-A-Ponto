@@ -298,6 +298,7 @@ def _metricas_reais(estado):
             "indice_equidade_territorial_real"
         ],
         "distancia_total_m": indicadores["distancia_percorrida_m"],
+        "entregues_atrasados": indicadores["entregues_atrasados"],
         "desempenho_entregadores": entregadores,
     }
 
@@ -366,7 +367,10 @@ def test_comparacao_estrategias_usa_condicoes_identicas_e_resultados_reais(
         assert metricas["pedidos_entregues"] == 15
         assert metricas["cumprimento_sla_pct"] is not None
         assert metricas["tempo_medio_entrega_min"] is not None
-        assert metricas["atraso_medio_min"] is None
+        if metricas["entregues_atrasados"]:
+            assert metricas["atraso_medio_min"] > 0
+        else:
+            assert metricas["atraso_medio_min"] is None
         assert metricas["indice_equidade_territorial"] is not None
         assert metricas["distancia_total_m"] > 0
         assert len(metricas["desempenho_entregadores"]) == 2
