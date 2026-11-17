@@ -67,7 +67,8 @@
   font-weight: 600;
 }
 
-.novo-pedido-formulario select {
+.novo-pedido-formulario select,
+.novo-pedido-formulario input[type='date'] {
   width: 100%;
   min-height: 42px;
   padding: 8px 10px;
@@ -76,6 +77,11 @@
   border: 1px solid var(--cor-borda);
   border-radius: 7px;
   font: inherit;
+}
+
+.novo-pedido-formulario small {
+  color: #667085;
+  font-size: 0.8rem;
 }
 
 .novo-pedido-formulario fieldset {

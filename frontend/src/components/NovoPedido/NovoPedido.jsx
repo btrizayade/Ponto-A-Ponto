@@ -11,7 +11,8 @@ import {
   bloquearEnvioDuplicado,
   camposPedidoValidos,
   liberarEnvio,
-  montarPedidoRequest
+  montarPedidoRequest,
+  restricoesDataCriacao
 } from './pedidoForm'
 import './NovoPedido.css'
 
@@ -45,6 +46,7 @@ function NovoPedido({ aoCadastrar }) {
   const [pedido, setPedido] = useState({
     cenario_id: '',
     bairro_id: '',
+    data_criacao: '',
     categoria_produto: '',
     modalidade: ''
   })
@@ -85,7 +87,16 @@ function NovoPedido({ aoCadastrar }) {
 
   function alterarCampo(evento) {
     const { name, value } = evento.target
-    setPedido((atual) => ({ ...atual, [name]: value }))
+    setPedido((atual) => {
+      if (name !== 'cenario_id') return { ...atual, [name]: value }
+      const cenario = cenarios.find((item) => item.id === Number(value))
+      const restricoes = restricoesDataCriacao(cenario)
+      return {
+        ...atual,
+        cenario_id: value,
+        data_criacao: restricoes.valorInicial
+      }
+    })
     setErro('')
     setSucesso('')
   }
@@ -94,6 +105,7 @@ function NovoPedido({ aoCadastrar }) {
     setPedido({
       cenario_id: '',
       bairro_id: '',
+      data_criacao: '',
       categoria_produto: '',
       modalidade: ''
     })
@@ -189,6 +201,29 @@ function NovoPedido({ aoCadastrar }) {
               ))}
             </select>
           </label>
+
+          {(() => {
+            const cenarioSelecionado = cenarios.find(
+              (item) => item.id === Number(pedido.cenario_id)
+            )
+            const restricoes = restricoesDataCriacao(cenarioSelecionado)
+            return (
+              <label>
+                Data de criação
+                <input
+                  type="date"
+                  name="data_criacao"
+                  value={pedido.data_criacao}
+                  min={restricoes.minimo}
+                  max={restricoes.maximo}
+                  onChange={alterarCampo}
+                  required
+                  disabled={!restricoes.minimo || enviando}
+                />
+                <small>O horário será definido pelo sistema como 09:00 (America/Bahia).</small>
+              </label>
+            )
+          })()}
 
           <label>
             Bairro de destino

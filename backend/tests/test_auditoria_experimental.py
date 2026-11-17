@@ -18,6 +18,7 @@ from app.domain.models import (
 from app.domain.routing import Coordenada
 from app.domain.simulation import Simulacao
 from app.infrastructure import database
+from app.domain.configuracao_temporal import obter_configuracao_temporal_cenario
 from app.infrastructure.auditoria_experimental import (
     FalhaPersistenciaAuditoriaRoteamento,
     ServicoRoteamentoAuditavel,
@@ -112,7 +113,8 @@ def test_api_persiste_parametros_efetivos_e_snapshot_completo(
         "build_id": None,
     }
     assert dados["parametros"]["cenario"]["codigo"] == codigo
-    assert dados["parametros"]["inicio"]["instante"] == INICIO.isoformat()
+    inicio_cenario = obter_configuracao_temporal_cenario(codigo).inicio_simulacao
+    assert dados["parametros"]["inicio"]["instante"] == inicio_cenario.isoformat()
     assert dados["parametros"]["inicio"]["fuso_horario"] == "America/Bahia"
     assert dados["parametros"]["roteamento"]["provedor"] == "simulado"
     assert (
@@ -138,18 +140,24 @@ def test_api_persiste_parametros_efetivos_e_snapshot_completo(
     }
 
     snapshot = dados["snapshot_pedidos"]
-    assert snapshot["versao"] == 1
+    assert snapshot["versao"] == 2
     entrada = snapshot["dados"]
-    assert entrada["versao"] == 1
+    assert entrada["versao"] == 2
     assert entrada["cenario"]["codigo"] == codigo
     assert len(entrada["pedidos"]) == quantidade
+    assert entrada["temporalidade"]["fuso_horario"] == "America/Bahia"
     pedido = entrada["pedidos"][0]
     assert {
         "id", "codigo", "bairro", "categoria_produto", "cliente_clube",
         "entrega_rapida", "sla_dias_uteis", "criado_em",
         "prazo_entrega_em", "peso_kg", "volume_l", "tempo_servico_min",
         "status_inicial_motor", "prioridade_inicial", "origem", "ativo",
+        "datas_historicas", "datas_efetivas",
     } <= set(pedido)
+    assert pedido["criado_em"] == pedido["datas_efetivas"]["criado_em"]
+    assert pedido["prazo_entrega_em"] == pedido["datas_efetivas"][
+        "prazo_entrega_em"
+    ]
     assert isinstance(pedido["prioridade_inicial"], int)
     assert {"id", "nome", "latitude", "longitude"} <= set(pedido["bairro"])
     assert dados["consultas_roteamento"] == []
@@ -243,6 +251,33 @@ def test_endpoint_parametros_nao_depende_do_registro_em_memoria(
         assert resposta.status_code == 200
         assert resposta.json()["disponivel"] is True
     registro.limpar()
+
+
+def test_leitura_de_snapshot_historico_v1_preserva_o_json_original(
+    banco_temporario,
+):
+    snapshot_v1 = {
+        "versao": 1,
+        "cenario": {"codigo": "NORMAL"},
+        "pedidos": [
+            {"codigo": "PED-001", "criado_em": "2026-10-26T09:15:00-03:00"}
+        ],
+    }
+    auditoria = AuditoriaSimulacao.criar(
+        inicio=INICIO,
+        centro=CENTRO,
+        entregadores=[Entregador("CAM-01")],
+        estrategia="DistribuicaoInsercaoMaisBarata",
+        parametros={"versao": 1},
+        snapshot_pedidos=snapshot_v1,
+    )
+
+    resultado = obter_parametros_experimentais(auditoria.simulacao_id)
+
+    assert resultado["snapshot_pedidos"] == {
+        "versao": 1,
+        "dados": snapshot_v1,
+    }
 
 
 def test_revisao_e_build_confiaveis_ficam_registrados_quando_disponiveis(

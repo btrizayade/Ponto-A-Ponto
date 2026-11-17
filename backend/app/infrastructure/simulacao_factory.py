@@ -6,6 +6,14 @@ from app.domain.distribution import (
     DistribuidorPedidos,
     EstrategiaDistribuicao,
 )
+from app.domain.alinhamento_temporal_pedidos import (
+    VERSAO_REGRA_TEMPORAL_PEDIDOS,
+    alinhar_pedidos_do_cenario,
+)
+from app.domain.configuracao_temporal import (
+    VERSAO_CONFIGURACAO_TEMPORAL_CENARIO,
+    obter_configuracao_temporal_cenario,
+)
 from app.domain.models import Entregador, OrigemPedido
 from app.domain.routing import ServicoRoteamento
 from app.domain.simulation import (
@@ -52,14 +60,28 @@ def criar_simulacao_auditada(
     e gravado assim que ocorre.
     """
 
-    pedidos = listar_pedidos_por_cenario(cenario_id)
-
-    if not pedidos:
-        raise ValueError(f"O cenario {cenario_id} nao possui pedidos.")
-
     cenario = obter_cenario(cenario_id)
     if cenario is None:
         raise ValueError(f"O cenario {cenario_id} nao existe.")
+
+    configuracao_temporal = obter_configuracao_temporal_cenario(
+        cenario.codigo
+    )
+    if configuracao_temporal is None:
+        raise ValueError(
+            f"O cenario {cenario.codigo} nao possui configuracao temporal."
+        )
+
+    pedidos_carregados = listar_pedidos_por_cenario(cenario_id)
+    pedidos_historicos, pedidos = alinhar_pedidos_do_cenario(
+        cenario.codigo,
+        pedidos_carregados,
+        inicio,
+    )
+    if not pedidos:
+        raise ValueError(
+            f"O cenario {cenario_id} nao possui pedidos para a simulacao."
+        )
 
     servico_efetivo = (
         servico
@@ -117,10 +139,25 @@ def criar_simulacao_auditada(
         "nome": cenario.nome,
         "descricao": cenario.descricao,
     }
+    parametros["temporalidade"] = {
+        "versao_configuracao": VERSAO_CONFIGURACAO_TEMPORAL_CENARIO,
+        "versao_regra_pedidos": VERSAO_REGRA_TEMPORAL_PEDIDOS,
+        "janela_criacao": {
+            "inicio": configuracao_temporal.data_inicial_janela.isoformat(),
+            "fim": configuracao_temporal.data_final_janela.isoformat(),
+        },
+        "inicio_simulacao_configurado": (
+            configuracao_temporal.inicio_simulacao.isoformat()
+        ),
+        "inicio_simulacao_utilizado": inicio.isoformat(),
+        "fuso_horario": configuracao_temporal.fuso_horario,
+    }
     snapshot_pedidos = serializar_snapshot_pedidos(
         cenario,
         pedidos,
         inicio,
+        pedidos_historicos=pedidos_historicos,
+        metadados_temporais=parametros["temporalidade"],
     )
 
     auditoria = AuditoriaSimulacao.criar(

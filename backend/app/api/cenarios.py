@@ -11,6 +11,9 @@ from app.api.schemas import (
 )
 from app.api.simulacoes import ESTRATEGIA_PADRAO, ESTRATEGIAS
 from app.domain.sla import HORA_FIM, HORA_INICIO
+from app.domain.configuracao_temporal import (
+    obter_configuracao_temporal_cenario,
+)
 from app.domain.models import CategoriaProduto, ModalidadeEntrega
 from app.infrastructure.cenario_repository import listar_cenarios, obter_cenario
 from app.infrastructure.distribution_config import (
@@ -57,15 +60,32 @@ def obter_configuracao():
 @router.get("/cenarios", response_model=list[CenarioResposta])
 def listar():
     return [
-        CenarioResposta(
-            id=cenario.id,
-            codigo=cenario.codigo,
-            nome=cenario.nome,
-            descricao=cenario.descricao,
-            quantidade_pedidos=len(listar_pedidos_por_cenario(cenario.id)),
-        )
+        _resposta_cenario(cenario)
         for cenario in listar_cenarios()
     ]
+
+
+def _resposta_cenario(cenario):
+    temporalidade = obter_configuracao_temporal_cenario(cenario.codigo)
+    return CenarioResposta(
+        id=cenario.id,
+        codigo=cenario.codigo,
+        nome=cenario.nome,
+        descricao=cenario.descricao,
+        quantidade_pedidos=len(listar_pedidos_por_cenario(cenario.id)),
+        temporalidade=(
+            {
+                "janela_criacao": {
+                    "inicio": temporalidade.data_inicial_janela,
+                    "fim": temporalidade.data_final_janela,
+                },
+                "inicio_simulacao": temporalidade.inicio_simulacao,
+                "fuso_horario": temporalidade.fuso_horario,
+            }
+            if temporalidade is not None
+            else None
+        ),
+    )
 
 
 @router.get(

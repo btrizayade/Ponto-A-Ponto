@@ -47,14 +47,18 @@
   flex-wrap: wrap;
 }
 
-.inicio-simulacao input {
-  min-width: 145px;
-  padding: 9px 10px;
-  border: 1px solid var(--cor-borda);
-  border-radius: 8px;
-  background: var(--cor-branco);
+.inicio-simulacao > span,
+.inicio-simulacao > strong {
+  font-size: 14px;
   color: var(--cor-texto);
-  font: inherit;
+}
+
+.inicio-simulacao > span {
+  font-weight: 600;
+}
+
+.inicio-simulacao > strong {
+  font-weight: 500;
 }
 
 .velocidade-simulacao {

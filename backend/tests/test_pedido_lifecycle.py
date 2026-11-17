@@ -32,6 +32,7 @@ from app.domain.models import CategoriaProduto, ModalidadeEntrega
 
 FUSO = ZoneInfo("America/Bahia")
 INICIO = datetime(2026, 10, 30, 10, 0, tzinfo=FUSO)
+INICIO_NORMAL = datetime(2026, 10, 7, 9, 0, tzinfo=FUSO)
 
 
 @pytest.fixture
@@ -43,12 +44,13 @@ def cenario_com_banco(tmp_path, monkeypatch):
     return {cenario.codigo: cenario for cenario in cenarios}
 
 
-def cadastrar_manual(cenario_id, codigo, bairro=None):
+def cadastrar_manual(cenario_id, codigo, bairro=None, criado_em=None):
     bairro = bairro or listar_bairros()[0]
     pedido = criar_pedido_do_formulario(
         bairro,
         CategoriaProduto.ALIMENTO,
         ModalidadeEntrega.CONVENCIONAL,
+        criado_em=criado_em or datetime(2026, 10, 30, 9, 0, tzinfo=FUSO),
     )
     pedido.codigo = codigo
     return obter_ou_criar_pedido(
@@ -121,6 +123,51 @@ def test_pedido_adicionado_apos_snapshot_fica_para_proxima_simulacao(
         *(f"PED-{numero:03d}" for numero in range(1, 11)),
         "MANUAL-PROXIMA-SIMULACAO",
     }
+
+
+def test_manual_futuro_mais_antigo_que_manual_do_snapshot_permanece_ativo(
+    cenario_com_banco,
+):
+    normal = cenario_com_banco["NORMAL"]
+    futuro = cadastrar_manual(
+        normal.id,
+        "MANUAL-FUTURO-ANTIGO",
+        criado_em=datetime(2026, 10, 8, 9, 0, tzinfo=FUSO),
+    )
+    incluido = cadastrar_manual(
+        normal.id,
+        "MANUAL-INCLUIDO-SNAPSHOT",
+        criado_em=INICIO_NORMAL,
+    )
+    assert futuro.id < incluido.id
+
+    simulacao, auditoria = criar_simulacao_auditada(
+        normal.id,
+        INICIO_NORMAL,
+        servico=ServicoRoteamentoSimulado(fator_transito=1.0),
+    )
+    codigos_snapshot = {pedido.codigo for pedido in simulacao.pedidos}
+    assert "MANUAL-FUTURO-ANTIGO" not in codigos_snapshot
+    assert "MANUAL-INCLUIDO-SNAPSHOT" in codigos_snapshot
+
+    simulacao.executar_ate_o_fim()
+
+    with database.conectar() as conexao:
+        registros = conexao.execute(
+            """
+            SELECT codigo, ativo
+            FROM pedidos
+            WHERE id IN (?, ?)
+            ORDER BY id
+            """,
+            (futuro.id, incluido.id),
+        ).fetchall()
+
+    assert [(registro["codigo"], registro["ativo"]) for registro in registros] == [
+        ("MANUAL-FUTURO-ANTIGO", 1),
+        ("MANUAL-INCLUIDO-SNAPSHOT", 0),
+    ]
+    assert obter_simulacao(auditoria.simulacao_id)["status"] == "concluida"
 
 
 def test_cadastro_durante_arquivamento_preserva_pedido_fora_do_snapshot(
@@ -228,6 +275,7 @@ def test_cadastro_durante_arquivamento_preserva_pedido_fora_do_snapshot(
             corpo_pedido = {
                 "cenario_id": normal.id,
                 "bairro_id": bairro_id,
+                "data_criacao": "2026-10-07",
                 "categoria_produto": "alimento",
                 "modalidade": "convencional",
             }
@@ -343,7 +391,11 @@ def test_pausa_e_execucao_em_andamento_nao_arquivam_pedidos(
     cenario_com_banco, monkeypatch
 ):
     normal = cenario_com_banco["NORMAL"]
-    cadastrar_manual(normal.id, "MANUAL-PAUSA")
+    cadastrar_manual(
+        normal.id,
+        "MANUAL-PAUSA",
+        criado_em=datetime(2026, 10, 7, 9, 0, tzinfo=FUSO),
+    )
     monkeypatch.setenv("EXECUCAO_AUTOMATICA_ATIVA", "false")
     registro.limpar()
 

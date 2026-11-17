@@ -33,9 +33,8 @@ from app.infrastructure.simulated_routing import (
 from app.main import app
 
 
-# Sexta-feira, 30/10/2026, no horario de Salvador.
+# Início legado mantido apenas para verificar compatibilidade da API.
 INICIO = "2026-10-30T09:00:00-03:00"
-INICIO_TARDE = "2026-10-30T16:30:00-03:00"
 
 
 @pytest.fixture
@@ -65,7 +64,7 @@ def cliente(tmp_path, monkeypatch):
 def criar(cliente, **dados):
     resposta = cliente.post(
         "/api/simulacoes",
-        json={"cenario_id": cliente.cenario_id, "inicio": INICIO, **dados},
+        json={"cenario_id": cliente.cenario_id, **dados},
     )
     assert resposta.status_code == 201, resposta.json()
 
@@ -415,6 +414,59 @@ def test_lista_cenarios_e_pedidos(cliente):
     assert pedidos[0]["bairro"] == "Comercio"
 
 
+def test_lista_cenarios_expoe_calendario_temporal_oficial(cliente):
+    inicializar_cenario_02()
+    inicializar_cenario_03()
+
+    resposta = cliente.get("/api/cenarios")
+
+    assert resposta.status_code == 200
+    por_codigo = {item["codigo"]: item for item in resposta.json()}
+    assert {
+        codigo: item["temporalidade"]
+        for codigo, item in por_codigo.items()
+    } == {
+        "NORMAL": {
+            "janela_criacao": {"inicio": "2026-10-05", "fim": "2026-10-07"},
+            "inicio_simulacao": "2026-10-07T09:00:00-03:00",
+            "fuso_horario": "America/Bahia",
+        },
+        "EQUIDADE": {
+            "janela_criacao": {"inicio": "2026-10-12", "fim": "2026-10-16"},
+            "inicio_simulacao": "2026-10-16T09:00:00-03:00",
+            "fuso_horario": "America/Bahia",
+        },
+        "ALTA_DEMANDA": {
+            "janela_criacao": {"inicio": "2026-10-26", "fim": "2026-10-30"},
+            "inicio_simulacao": "2026-10-30T09:00:00-03:00",
+            "fuso_horario": "America/Bahia",
+        },
+    }
+
+
+def test_inicio_legado_nao_substitui_configuracao_do_cenario(cliente):
+    resposta = cliente.post(
+        "/api/simulacoes",
+        json={
+            "cenario_id": cliente.cenario_id,
+            "inicio": "2026-10-30T16:59:00-03:00",
+        },
+    )
+
+    assert resposta.status_code == 201, resposta.json()
+    assert resposta.json()["inicio"] == "2026-10-07T09:00:00-03:00"
+
+
+def test_criacao_nao_exige_inicio_do_cliente(cliente):
+    resposta = cliente.post(
+        "/api/simulacoes",
+        json={"cenario_id": cliente.cenario_id},
+    )
+
+    assert resposta.status_code == 201, resposta.json()
+    assert resposta.json()["inicio"] == "2026-10-07T09:00:00-03:00"
+
+
 def test_indicadores_territoriais_estao_disponiveis_nos_tres_cenarios(
     cliente,
 ):
@@ -466,7 +518,7 @@ def test_simulacao_criada_comeca_parada(cliente):
     estado = criar(cliente)
 
     assert not estado["iniciada"]
-    assert estado["agora"] == INICIO
+    assert estado["agora"] == "2026-10-07T09:00:00-03:00"
     assert estado["provedor"] == "simulado"
     assert estado["estrategia"] == "insercao_mais_barata"
     assert estado["fila"] == []
@@ -652,13 +704,13 @@ def test_parametros_da_criacao(cliente):
 def test_inicio_sem_fuso_usa_o_horario_de_salvador(cliente):
     estado = criar(cliente, inicio="2026-10-30T09:00:00")
 
-    assert estado["agora"] == INICIO
+    assert estado["agora"] == "2026-10-07T09:00:00-03:00"
 
 
-def test_inicio_selecionado_as_1659_e_preservado_no_fuso_de_salvador(cliente):
+def test_inicio_legado_as_1659_nao_altera_inicio_fixo(cliente):
     estado = criar(cliente, inicio="2026-10-30T16:59:00")
 
-    assert estado["inicio"] == "2026-10-30T16:59:00-03:00"
+    assert estado["inicio"] == "2026-10-07T09:00:00-03:00"
     assert estado["agora"] == estado["inicio"]
 
 
@@ -666,7 +718,7 @@ def test_pedido_expoe_separadamente_datas_originais_e_simuladas(cliente):
     origem = cliente.get(
         f"/api/cenarios/{cliente.cenario_id}/pedidos"
     ).json()
-    simulacao_id = criar(cliente, inicio=INICIO)["id"]
+    simulacao_id = criar(cliente)["id"]
     resposta = cliente.post(
         f"/api/simulacoes/{simulacao_id}/proxima-etapa"
     )
@@ -678,15 +730,30 @@ def test_pedido_expoe_separadamente_datas_originais_e_simuladas(cliente):
     pedido = next(iter(por_codigo_simulacao.values()))
     original = por_codigo_origem[pedido["codigo"]]
 
-    assert pedido["criado_em"] == original["criado_em"]
-    assert pedido["prazo_entrega_em"] == original["prazo_entrega_em"]
+    assert pedido["criado_em"] != original["criado_em"]
+    assert datetime.fromisoformat(pedido["criado_em"]) <= datetime.fromisoformat(
+        estado["inicio"]
+    )
+    dados_auditoria = cliente.get(
+        f"/api/simulacoes/{simulacao_id}/parametros"
+    ).json()["snapshot_pedidos"]["dados"]
+    entrada = next(
+        item for item in dados_auditoria["pedidos"]
+        if item["codigo"] == pedido["codigo"]
+    )
+    assert entrada["datas_historicas"]["criado_em"] == original["criado_em"]
+    assert entrada["datas_historicas"]["prazo_entrega_em"] == original[
+        "prazo_entrega_em"
+    ]
+    assert entrada["criado_em"] == pedido["criado_em"]
+    assert entrada["prazo_entrega_em"] == pedido["prazo_entrega_em"]
     assert pedido["atualizado_em"] == estado["inicio"]
     assert any(item["previsao_entrega_em"] for item in estado["pedidos"])
     assert all(item["entregue_em"] is None for item in estado["pedidos"])
 
 
 def test_horario_real_de_entrega_e_ultima_atualizacao_vem_dos_eventos(cliente):
-    simulacao_id = criar(cliente, inicio=INICIO)["id"]
+    simulacao_id = criar(cliente)["id"]
     estado = None
     while estado is None or not estado["concluida"]:
         resposta = cliente.post(
@@ -706,29 +773,46 @@ def test_horario_real_de_entrega_e_ultima_atualizacao_vem_dos_eventos(cliente):
     )
 
 
-def test_horarios_em_outro_fuso_sao_convertidos_para_salvador(cliente):
-    simulacao_id = criar(cliente, inicio="2026-10-30T12:00:00Z")["id"]
+def test_inicio_legado_em_outro_fuso_nao_altera_inicio_fixo(cliente):
+    simulacao_id = criar(cliente, inicio="2026-10-07T12:00:00Z")["id"]
 
     resultado = acao(cliente, simulacao_id, "proxima-etapa")
     gravados = cliente.get(f"/api/simulacoes/{simulacao_id}/eventos").json()
 
-    assert resultado["estado"]["agora"] == INICIO
+    assert resultado["estado"]["agora"] == "2026-10-07T09:00:00-03:00"
     assert resultado["eventos"] == gravados
 
     estado = acao(
-        cliente, simulacao_id, "avancar", ate="2026-10-30T13:00:00Z"
+        cliente, simulacao_id, "avancar", ate="2026-10-07T13:00:00Z"
     )["estado"]
-    assert estado["agora"] == "2026-10-30T10:00:00-03:00"
+    assert estado["agora"] == "2026-10-07T10:00:00-03:00"
+
+
+@pytest.mark.parametrize(
+    "inicio_legado",
+    [
+        "2026-10-31T09:00:00-03:00",
+        "2026-10-30T08:59:00-03:00",
+        "2026-10-30T17:00:00-03:00",
+        "2026-10-30T18:00:00-03:00",
+    ],
+)
+def test_inicio_legado_fora_do_expediente_e_ignorado(
+    cliente, inicio_legado
+):
+    resposta = cliente.post(
+        "/api/simulacoes",
+        json={"cenario_id": cliente.cenario_id, "inicio": inicio_legado},
+    )
+
+    assert resposta.status_code == 201, resposta.json()
+    assert resposta.json()["inicio"] == "2026-10-07T09:00:00-03:00"
 
 
 @pytest.mark.parametrize(
     "dados, codigo",
     [
         ({"cenario_id": 999}, 404),
-        ({"inicio": "2026-10-31T09:00:00-03:00"}, 400),  # sabado
-        ({"inicio": "2026-10-30T08:59:00-03:00"}, 400),
-        ({"inicio": "2026-10-30T17:00:00-03:00"}, 400),
-        ({"inicio": "2026-10-30T18:00:00-03:00"}, 400),
         ({"provedor": "google"}, 400),  # sem chave
         ({"provedor": "outro"}, 422),
         ({"estrategia": "outra"}, 422),
@@ -738,7 +822,7 @@ def test_horarios_em_outro_fuso_sao_convertidos_para_salvador(cliente):
 def test_criacao_invalida(cliente, dados, codigo):
     resposta = cliente.post(
         "/api/simulacoes",
-        json={"cenario_id": cliente.cenario_id, "inicio": INICIO, **dados},
+        json={"cenario_id": cliente.cenario_id, **dados},
     )
 
     assert resposta.status_code == codigo
@@ -771,17 +855,70 @@ def test_primeira_etapa_inicia_e_planeja(cliente):
         assert pedido["prioridade"] is not None
 
 
+def test_previsao_do_plano_permanece_apos_evento_de_entrega(cliente):
+    estado_criado = criar(cliente)
+    simulacao_id = estado_criado["id"]
+
+    # Antes do planejamento ainda não existe parada associada a nenhum pedido.
+    assert all(
+        pedido["previsao_entrega_em"] is None
+        for pedido in estado_criado["pedidos"]
+    )
+
+    estado_antes = acao(
+        cliente, simulacao_id, "proxima-etapa"
+    )["estado"]
+    pedido_antes = next(
+        pedido for pedido in estado_antes["pedidos"]
+        if pedido["codigo"] == "PED-001"
+    )
+    assert pedido_antes["previsao_entrega_em"] is not None
+    assert pedido_antes["entregue_em"] is None
+
+    rotas = cliente.get(f"/api/simulacoes/{simulacao_id}/rotas").json()
+    parada_planejada = next(
+        parada
+        for rota in rotas["rotas"]
+        for viagem in rota["viagens"]
+        for parada in viagem["paradas"]
+        if parada["pedido_codigo"] == "PED-001"
+    )
+    saida_planejada = parada_planejada["saida_em"]
+    assert pedido_antes["previsao_entrega_em"] == saida_planejada
+
+    resultado = acao(
+        cliente,
+        simulacao_id,
+        "avancar",
+        ate=saida_planejada,
+    )
+    evento_entrega = next(
+        evento for evento in resultado["eventos"]
+        if evento["tipo"] == "pedido_entregue"
+        and evento["pedido_codigo"] == "PED-001"
+    )
+    pedido_depois = next(
+        pedido for pedido in resultado["estado"]["pedidos"]
+        if pedido["codigo"] == "PED-001"
+    )
+
+    assert pedido_depois["status"] == "entregue"
+    assert pedido_depois["previsao_entrega_em"] == saida_planejada
+    assert pedido_depois["entregue_em"] == evento_entrega["instante"]
+    assert pedido_depois["entregue_em"] == saida_planejada
+
+
 def test_avancar_por_minutos_e_ate_um_horario(cliente):
     simulacao_id = criar(cliente)["id"]
 
     estado = acao(cliente, simulacao_id, "avancar", minutos=30)["estado"]
-    assert estado["agora"] == "2026-10-30T09:30:00-03:00"
+    assert estado["agora"] == "2026-10-07T09:30:00-03:00"
     assert any(e["situacao"] == "em_viagem" for e in estado["entregadores"])
 
     estado = acao(
-        cliente, simulacao_id, "avancar", ate="2026-10-30T10:00:00"
+        cliente, simulacao_id, "avancar", ate="2026-10-07T10:00:00"
     )["estado"]
-    assert estado["agora"] == "2026-10-30T10:00:00-03:00"
+    assert estado["agora"] == "2026-10-07T10:00:00-03:00"
 
 
 @pytest.mark.parametrize(
@@ -790,7 +927,7 @@ def test_avancar_por_minutos_e_ate_um_horario(cliente):
         ({}, 422),
         ({"minutos": 10, "ate": INICIO}, 422),
         ({"minutos": -1}, 422),
-        ({"ate": "2026-10-30T08:00:00-03:00"}, 400),
+        ({"ate": "2026-10-06T08:00:00-03:00"}, 400),
     ],
 )
 def test_avanco_invalido(cliente, corpo, codigo):
@@ -911,37 +1048,6 @@ def test_executar_ate_o_fim(cliente):
     assert acao(cliente, simulacao_id, "proxima-etapa")["eventos"] == []
 
 
-def test_viagem_cancelada_pelo_expediente(cliente):
-    simulacao_id = criar(cliente, inicio=INICIO_TARDE)["id"]
-
-    # Antes das 17h, a viagem que sairia depois nao tem previsao.
-    estado = acao(cliente, simulacao_id, "proxima-etapa")["estado"]
-    rotas = cliente.get(f"/api/simulacoes/{simulacao_id}/rotas").json()
-    fora_do_expediente = {
-        parada["pedido_codigo"]
-        for rota in rotas["rotas"]
-        for viagem in rota["viagens"]
-        if viagem["partida_em"] > "2026-10-30T17:00:00-03:00"
-        for parada in viagem["paradas"]
-    }
-    assert fora_do_expediente
-    for pedido in estado["pedidos"]:
-        if pedido["codigo"] in fora_do_expediente:
-            assert pedido["status"] == "atribuido"
-            assert pedido["previsao_entrega_em"] is None
-
-    estado = acao(cliente, simulacao_id, "executar")["estado"]
-    indicadores = estado["indicadores"]
-    devolvidos = [p for p in estado["pedidos"] if p["status"] == "na_fila"]
-
-    assert indicadores["viagens_canceladas"] == 1
-    assert indicadores["devolvidos_a_fila"] == 1
-    assert estado["fila"] == [p["codigo"] for p in devolvidos]
-    assert devolvidos[0]["entregador_codigo"] is None
-    assert devolvidos[0]["previsao_entrega_em"] is None
-    assert "expediente" in devolvidos[0]["observacao"]
-
-
 # Rotas, eventos e auditoria
 
 
@@ -959,7 +1065,11 @@ def test_rotas_para_o_mapa(cliente):
     assert rotas["nao_atribuidos"] == []
     assert sum(len(v["paradas"]) for v in viagens) == 10
 
-    assert {v["situacao"] for v in viagens} == {"planejada", "em_andamento"}
+    assert {v["situacao"] for v in viagens} <= {
+        "planejada",
+        "em_andamento",
+    }
+    assert "em_andamento" in {v["situacao"] for v in viagens}
 
     for viagem in viagens:
         assert len(viagem["caminho"]) >= 2

@@ -13,7 +13,12 @@ from app.infrastructure.seed import inicializar_todos_cenarios
 from app.main import app
 
 
-INICIO = "2026-10-30T10:00:00-03:00"
+INICIO = "2026-10-07T09:00:00-03:00"
+INICIOS_CENARIOS = {
+    "NORMAL": "2026-10-07T09:00:00-03:00",
+    "EQUIDADE": "2026-10-16T09:00:00-03:00",
+    "ALTA_DEMANDA": "2026-10-30T09:00:00-03:00",
+}
 
 
 @pytest.fixture
@@ -68,7 +73,7 @@ def test_criacao_pausa_bloqueia_avanco_e_retomada_preserva_estado(
     assert criada["estado_execucao"] == "aguardando"
     assert criada["estrategia"] == "equidade_sla"
     assert criada["segundos_reais_por_hora_simulada"] == velocidade
-    assert criada["agora"] == INICIO
+    assert criada["agora"] == INICIOS_CENARIOS["EQUIDADE"]
 
     iniciada = avancar(cliente, simulacao_id)
     estado_em_execucao = iniciada["estado"]
