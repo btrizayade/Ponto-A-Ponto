@@ -5,6 +5,7 @@ import {
   buscarBairros,
   buscarCenarios,
   buscarConfiguracao,
+  buscarParametrosSimulacao,
   buscarRotas,
   buscarSimulacao,
   criarPedido,
@@ -116,6 +117,26 @@ test('consulta as rotas para atualizar viagens e paradas durante o polling', asy
 
   assert.deepEqual(await buscarRotas(15), rotas)
   assert.equal(chamada, 'http://127.0.0.1:8000/api/simulacoes/15/rotas')
+})
+
+test('consulta o snapshot persistido para obter origem e ordem de criação dos pedidos', async () => {
+  const auditoria = {
+    disponivel: true,
+    snapshot_pedidos: { dados: { pedidos: [{ id: 17, codigo: 'manual-x', origem: 'manual' }] } },
+  }
+  const controller = new AbortController()
+  let chamada
+  globalThis.fetch = async (url, opcoes) => {
+    chamada = { url, opcoes }
+    return new Response(JSON.stringify(auditoria), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' }
+    })
+  }
+
+  assert.deepEqual(await buscarParametrosSimulacao(15, { signal: controller.signal }), auditoria)
+  assert.equal(chamada.url, 'http://127.0.0.1:8000/api/simulacoes/15/parametros')
+  assert.equal(chamada.opcoes.signal, controller.signal)
 })
 
 test('envia o relógio simulado selecionado sem conversão para UTC', async () => {

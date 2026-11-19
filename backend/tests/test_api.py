@@ -701,6 +701,57 @@ def test_parametros_da_criacao(cliente):
     )
 
 
+@pytest.mark.parametrize("quantidade", [1, 2, 3, 4, 5])
+def test_quantidade_entregadores_preservada_na_criacao_planejamento_e_rotas(
+    cliente, quantidade
+):
+    codigos_esperados = [
+        f"CAM-{numero:02d}" for numero in range(1, quantidade + 1)
+    ]
+    criada = criar(
+        cliente,
+        quantidade_entregadores=quantidade,
+        estrategia="ordem_da_fila",
+    )
+    simulacao_id = criada["id"]
+
+    assert [e["codigo"] for e in criada["entregadores"]] == codigos_esperados
+
+    auditoria = cliente.get(
+        f"/api/simulacoes/{simulacao_id}/parametros"
+    ).json()
+    entregadores_auditados = auditoria["parametros"]["distribuicao"][
+        "entregadores"
+    ]
+    assert [e["codigo"] for e in entregadores_auditados] == codigos_esperados
+
+    estado = acao(cliente, simulacao_id, "proxima-etapa")["estado"]
+    ativa = registro.obter(simulacao_id)
+    assert [e["codigo"] for e in estado["entregadores"]] == codigos_esperados
+    assert {
+        pedido["entregador_codigo"]
+        for pedido in estado["pedidos"]
+        if pedido["entregador_codigo"] is not None
+    } == set(codigos_esperados)
+    assert [
+        rota.entregador.codigo for rota in ativa.simulacao.plano.rotas
+    ] == codigos_esperados
+
+    resposta_rotas = cliente.get(
+        f"/api/simulacoes/{simulacao_id}/rotas"
+    )
+    assert resposta_rotas.status_code == 200, resposta_rotas.json()
+    rotas = resposta_rotas.json()
+    assert [rota["entregador_codigo"] for rota in rotas["rotas"]] == (
+        codigos_esperados
+    )
+    assert sum(
+        len(viagem["paradas"])
+        for rota in rotas["rotas"]
+        for viagem in rota["viagens"]
+    ) + len(rotas["nao_atribuidos"]) == 10
+
+
 def test_inicio_sem_fuso_usa_o_horario_de_salvador(cliente):
     estado = criar(cliente, inicio="2026-10-30T09:00:00")
 

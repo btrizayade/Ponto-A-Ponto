@@ -130,7 +130,8 @@ function ControleSimulacao({
 
       const configuracao = await obterConfiguracaoBaseNovaSimulacao({
         cenarios,
-        quantidadeEntregadoresPadrao
+        quantidadeEntregadoresPadrao,
+        quantidadeEntregadoresSelecionada: quantidadeEntregadores
       })
 
       aoTrocarCenario(configuracao.cenarioId)

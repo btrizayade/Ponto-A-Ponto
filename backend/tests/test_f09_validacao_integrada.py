@@ -181,6 +181,57 @@ def test_cadastro_consulta_e_execucao_dos_tres_cenarios(cliente_tres_cenarios):
     ).status_code == 200
 
 
+@pytest.mark.parametrize("codigo", ["NORMAL", "EQUIDADE", "ALTA_DEMANDA"])
+def test_quantidade_de_entregadores_e_preservada_nos_tres_cenarios(
+    cliente_tres_cenarios, codigo
+):
+    cliente = cliente_tres_cenarios
+    quantidade = 4
+    codigos_esperados = [
+        f"CAM-{numero:02d}" for numero in range(1, quantidade + 1)
+    ]
+    criada = cliente.post(
+        "/api/simulacoes",
+        json={
+            "cenario_id": cliente.cenarios_por_codigo[codigo],
+            "provedor": "simulado",
+            "quantidade_entregadores": quantidade,
+        },
+    )
+    assert criada.status_code == 201, criada.json()
+    simulacao_id = criada.json()["id"]
+    estrategia_esperada = (
+        "equidade_sla" if codigo == "EQUIDADE" else "insercao_mais_barata"
+    )
+    assert criada.json()["estrategia"] == estrategia_esperada
+    assert [e["codigo"] for e in criada.json()["entregadores"]] == (
+        codigos_esperados
+    )
+
+    planejamento = cliente.post(
+        f"/api/simulacoes/{simulacao_id}/proxima-etapa"
+    )
+    assert planejamento.status_code == 200, planejamento.json()
+    estado = planejamento.json()["estado"]
+    assert [e["codigo"] for e in estado["entregadores"]] == codigos_esperados
+
+    auditoria = cliente.get(
+        f"/api/simulacoes/{simulacao_id}/parametros"
+    ).json()
+    assert [
+        e["codigo"]
+        for e in auditoria["parametros"]["distribuicao"]["entregadores"]
+    ] == codigos_esperados
+
+    rotas = cliente.get(
+        f"/api/simulacoes/{simulacao_id}/rotas"
+    )
+    assert rotas.status_code == 200, rotas.json()
+    assert [
+        rota["entregador_codigo"] for rota in rotas.json()["rotas"]
+    ] == codigos_esperados
+
+
 @pytest.mark.parametrize(
     "inicio",
     [
