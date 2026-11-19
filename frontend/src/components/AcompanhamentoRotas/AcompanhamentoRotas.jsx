@@ -7,8 +7,14 @@ import {
   buscarSimulacao,
 } from '../../services/api.js'
 import { INTERVALO_ATUALIZACAO_SIMULACAO_MS } from '../../utils/pollingSimulacao.js'
-import { obterIdSimulacaoDaBusca } from '../../utils/rotasUrl.js'
-import { criarSincronizadorAbasSimulacao } from '../../utils/sincronizacaoAbasSimulacao.js'
+import {
+  atualizarUrlAcompanhamentoRotas,
+  obterIdSimulacaoDaBusca,
+} from '../../utils/rotasUrl.js'
+import {
+  EVENTO_SELECAO_SIMULACAO,
+  criarSincronizadorAbasSimulacao,
+} from '../../utils/sincronizacaoAbasSimulacao.js'
 import './AcompanhamentoRotas.css'
 
 const ROTULOS_ESTADO = {
@@ -24,6 +30,7 @@ function AcompanhamentoRotas() {
     () => obterIdSimulacaoDaBusca(window.location.search),
   )
   const idSimulacaoRef = useRef(idSimulacao)
+  const selecaoAtualRef = useRef(null)
   const solicitarConsultaRef = useRef(null)
   const [simulacao, setSimulacao] = useState(null)
   const [rotas, setRotas] = useState(null)
@@ -44,37 +51,74 @@ function AcompanhamentoRotas() {
       setCarregando(aguardandoSimulacao)
     }
 
+    // A query inicial define o primeiro estado. Depois da inscrição, uma nova
+    // seleção válida do painel prevalece; uma navegação explícita do navegador
+    // ou via atualizarUrlAcompanhamentoRotas volta a controlar a página.
+    const aplicarIdDaUrl = (busca) => {
+      const novoId = obterIdSimulacaoDaBusca(busca)
+      const idAtual = idSimulacaoRef.current
+      selecaoAtualRef.current = null
+      if (novoId === idAtual) {
+        solicitarConsultaRef.current?.()
+        return
+      }
+      idSimulacaoRef.current = novoId
+      setIdSimulacao(novoId)
+      limparDados(Boolean(novoId))
+    }
+
+    const aoPopstate = () => aplicarIdDaUrl(window.location.search)
+    const aoAlterarUrlProgramaticamente = (evento) => {
+      aplicarIdDaUrl(evento.detail?.search ?? window.location.search)
+    }
+
     const sincronizador = criarSincronizadorAbasSimulacao({
       aoReceber: (mensagem) => {
-        const idAtual = idSimulacaoRef.current
-
         if (mensagem.tipo === 'simulacao_limpa') {
-          if (mensagem.simulacao_anterior_id !== idAtual) return
+          selecaoAtualRef.current = null
           idSimulacaoRef.current = null
           setIdSimulacao(null)
+          atualizarUrlAcompanhamentoRotas(null, window, { notificar: false })
           limparDados(false)
           return
         }
 
-        const novoId = mensagem.simulacao_id
-        // IDs SQLite são crescentes: mensagens atrasadas de uma execução
-        // anterior não podem substituir a simulação mais recente.
-        if (idAtual !== null && novoId < idAtual) return
-
-        if (novoId !== idAtual) {
-          idSimulacaoRef.current = novoId
-          setIdSimulacao(novoId)
-          limparDados()
+        if (mensagem.tipo === 'simulacao_selecionada') {
+          const idAtual = idSimulacaoRef.current
+          const selecaoAnterior = selecaoAtualRef.current
+          const mudouSelecao = selecaoAnterior !== mensagem.selecao_id
+          selecaoAtualRef.current = mensagem.selecao_id
+          if (idAtual !== mensagem.simulacao_id) {
+            idSimulacaoRef.current = mensagem.simulacao_id
+            setIdSimulacao(mensagem.simulacao_id)
+            limparDados()
+          } else if (mudouSelecao) {
+            solicitarConsultaRef.current?.()
+          }
+          atualizarUrlAcompanhamentoRotas(
+            mensagem.simulacao_id,
+            window,
+            { notificar: false },
+          )
           return
         }
 
-        // O evento informa que algo mudou, mas estado e relógio continuam
-        // vindo da API. A consulta imediata evita esperar o próximo polling.
-        solicitarConsultaRef.current?.()
+        // Estado, relógio e rotas continuam vindo da API. A mensagem só
+        // antecipa a consulta da seleção que continua sendo acompanhada.
+        if (mensagem.simulacao_id === idSimulacaoRef.current) {
+          solicitarConsultaRef.current?.()
+        }
       },
     })
 
-    return () => sincronizador.fechar()
+    window.addEventListener('popstate', aoPopstate)
+    window.addEventListener(EVENTO_SELECAO_SIMULACAO, aoAlterarUrlProgramaticamente)
+
+    return () => {
+      sincronizador.fechar()
+      window.removeEventListener('popstate', aoPopstate)
+      window.removeEventListener(EVENTO_SELECAO_SIMULACAO, aoAlterarUrlProgramaticamente)
+    }
   }, [])
 
   useEffect(() => {
@@ -118,16 +162,21 @@ function AcompanhamentoRotas() {
           }
         }
 
-        if (!desmontado) {
+        if (!desmontado && idSimulacaoRef.current === idSimulacao) {
           setSimulacao(estado)
           setRotas(rotasAtuais)
           setEstadoAutoritativo(true)
           setErro('')
           setCarregando(false)
         }
+        if (idSimulacaoRef.current !== idSimulacao) return
         terminal = estado.estado_execucao === 'concluida' || estado.concluida
       } catch (erroConsulta) {
-        if (desmontado || erroConsulta.name === 'AbortError') {
+        if (
+          desmontado
+          || idSimulacaoRef.current !== idSimulacao
+          || erroConsulta.name === 'AbortError'
+        ) {
           consultaEmAndamento = false
           return
         }
@@ -140,7 +189,7 @@ function AcompanhamentoRotas() {
         consultaEmAndamento = false
       }
 
-      if (desmontado || terminal) return
+      if (desmontado || idSimulacaoRef.current !== idSimulacao || terminal) return
       if (consultaPendente) {
         consultaPendente = false
         temporizador = window.setTimeout(consultar, 0)
@@ -178,19 +227,25 @@ function AcompanhamentoRotas() {
     const consulta = new AbortController()
     buscarParametrosSimulacao(idSimulacao, { signal: consulta.signal })
       .then((auditoria) => {
-        if (desmontado) return
+        if (desmontado || idSimulacaoRef.current !== idSimulacao) return
         const pedidos = auditoria.disponivel
           ? auditoria.snapshot_pedidos?.dados?.pedidos
           : null
         setSnapshotPedidos(Array.isArray(pedidos) ? pedidos : null)
       })
       .catch((erroParametros) => {
-        if (!desmontado && erroParametros.name !== 'AbortError') {
+        if (
+          !desmontado
+          && idSimulacaoRef.current === idSimulacao
+          && erroParametros.name !== 'AbortError'
+        ) {
           setSnapshotPedidos(null)
         }
       })
       .finally(() => {
-        if (!desmontado) setSnapshotCarregando(false)
+        if (!desmontado && idSimulacaoRef.current === idSimulacao) {
+          setSnapshotCarregando(false)
+        }
       })
 
     return () => {

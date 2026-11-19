@@ -12,7 +12,10 @@ import { buscarSimulacao } from './services/api'
 import { mensagemFalhaExecucao } from './utils/mensagemFalhaExecucao'
 import { INTERVALO_ATUALIZACAO_SIMULACAO_MS } from './utils/pollingSimulacao.js'
 import { criarUrlAcompanhamentoRotas } from './utils/rotasUrl.js'
-import { criarSincronizadorAbasSimulacao } from './utils/sincronizacaoAbasSimulacao.js'
+import {
+  criarIdentificadorSelecao,
+  criarSincronizadorAbasSimulacao,
+} from './utils/sincronizacaoAbasSimulacao.js'
 
 import './App.css'
 
@@ -40,6 +43,7 @@ function PainelPrincipal() {
   const estadoSimulacaoRef = useRef(simulacao?.estado_execucao)
   const idSimulacaoRef = useRef(idSimulacao)
   const sincronizadorAbasRef = useRef(null)
+  const selecaoSimulacaoRef = useRef(null)
   const ultimoEstadoPublicadoRef = useRef({ id: null, estado: null })
 
   useEffect(() => {
@@ -69,6 +73,7 @@ function PainelPrincipal() {
     sincronizadorAbasRef.current?.publicar({
       tipo: 'estado_alterado',
       simulacaoId: estado.id,
+      selecaoId: selecaoSimulacaoRef.current,
       estadoExecucao: estado.estado_execucao,
     })
   }, [])
@@ -87,17 +92,24 @@ function PainelPrincipal() {
 
   const atualizarIdSimulacao = useCallback((id) => {
     const anterior = idSimulacaoRef.current
+    const selecaoAnterior = selecaoSimulacaoRef.current
     idSimulacaoRef.current = id
     setIdSimulacao(id)
     if (Number.isSafeInteger(id) && id > 0) {
+      const selecaoId = criarIdentificadorSelecao()
+      selecaoSimulacaoRef.current = selecaoId
+      ultimoEstadoPublicadoRef.current = { id: null, estado: null }
       sincronizadorAbasRef.current?.publicar({
         tipo: 'simulacao_selecionada',
         simulacaoId: id,
+        selecaoId,
       })
     } else if (Number.isSafeInteger(anterior) && anterior > 0) {
+      selecaoSimulacaoRef.current = null
       sincronizadorAbasRef.current?.publicar({
         tipo: 'simulacao_limpa',
         simulacaoAnteriorId: anterior,
+        selecaoId: selecaoAnterior,
       })
       ultimoEstadoPublicadoRef.current = { id: null, estado: null }
     }

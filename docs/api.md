@@ -12,6 +12,12 @@ python -m app.infrastructure.seed   # cria o banco e os três cenários
 uvicorn app.main:app --reload
 ```
 
+`PONTO_A_PONTO_DATABASE_PATH` pode apontar para outro arquivo SQLite. Um
+caminho absoluto é usado como informado; um caminho relativo é resolvido a
+partir da pasta `backend`, independentemente do diretório de onde o processo é
+iniciado. Se a variável estiver ausente, vazia ou contiver apenas espaços, o
+backend usa `backend/data/pontoaponto.db`.
+
 | Endereço | Conteúdo |
 | -- | -- |
 | `http://localhost:8000/docs` | Swagger: todos os endpoints, com os campos e um botão para testar |

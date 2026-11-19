@@ -11,11 +11,15 @@ BACKEND_DIR = Path(__file__).resolve().parents[2]
 VARIAVEL_CAMINHO_BANCO = "PONTO_A_PONTO_DATABASE_PATH"
 CAMINHO_BANCO_PADRAO = BACKEND_DIR / "data" / "pontoaponto.db"
 _caminho_configurado = os.getenv(VARIAVEL_CAMINHO_BANCO)
-DATABASE_PATH = (
-    Path(_caminho_configurado).expanduser()
-    if _caminho_configurado and _caminho_configurado.strip()
-    else CAMINHO_BANCO_PADRAO
-)
+if _caminho_configurado and _caminho_configurado.strip():
+    _caminho_banco = Path(_caminho_configurado).expanduser()
+    DATABASE_PATH = (
+        _caminho_banco
+        if _caminho_banco.is_absolute()
+        else (BACKEND_DIR / _caminho_banco).resolve()
+    )
+else:
+    DATABASE_PATH = CAMINHO_BANCO_PADRAO
 DATABASE_DIR = DATABASE_PATH.parent
 SCHEMA_PATH = PROJECT_ROOT / "sql" / "schema.sql"
 

@@ -39,17 +39,32 @@ test('HTTP 404/410 marca o relógio como não autoritativo e informa que a anima
   assert.match(veiculos, /if \(!estadoAutoritativo \|\| simulacao\?\.estado_execucao !== 'executando'\)/)
 })
 
-test('a página aguarda e acompanha a simulação selecionada em outra aba', async () => {
+test('a página acompanha seleções versionadas, limpa e estado apenas da seleção atual', async () => {
   const fonte = await readFile(pageUrl, 'utf8')
 
   assert.match(fonte, /useState\(\s*\(\) => obterIdSimulacaoDaBusca/)
   assert.match(fonte, /criarSincronizadorAbasSimulacao\(/)
   assert.match(fonte, /mensagem\.tipo === 'simulacao_limpa'/)
-  assert.match(fonte, /mensagem\.simulacao_anterior_id !== idAtual/)
-  assert.match(fonte, /if \(idAtual !== null && novoId < idAtual\) return/)
+  assert.match(fonte, /mensagem\.tipo === 'simulacao_selecionada'/)
+  assert.match(fonte, /if \(mensagem\.tipo === 'simulacao_limpa'\) \{[\s\S]*?setIdSimulacao\(null\)/)
+  assert.doesNotMatch(fonte, /simulacao_anterior_id !== idSimulacaoRef\.current/)
+  assert.match(fonte, /mensagem\.selecao_id/)
+  assert.doesNotMatch(fonte, /novoId < idAtual/)
   assert.match(fonte, /solicitarConsultaRef\.current\?\.\(\)/)
   assert.match(fonte, /limparDados\(\)/)
-  assert.match(fonte, /return \(\) => sincronizador\.fechar\(\)/)
+  assert.match(fonte, /return \(\) => \{[\s\S]*?sincronizador\.fechar\(\)/)
+})
+
+test('a página sincroniza URL inicial, popstate e alterações programáticas e remove listeners', async () => {
+  const fonte = await readFile(pageUrl, 'utf8')
+
+  assert.match(fonte, /window\.addEventListener\('popstate', aoPopstate\)/)
+  assert.match(fonte, /EVENTO_SELECAO_SIMULACAO, aoAlterarUrlProgramaticamente/)
+  assert.match(fonte, /obterIdSimulacaoDaBusca\(busca\)/)
+  assert.match(fonte, /atualizarUrlAcompanhamentoRotas\([\s\S]*?mensagem\.simulacao_id/)
+  assert.match(fonte, /window\.removeEventListener\('popstate', aoPopstate\)/)
+  assert.match(fonte, /consultaAtual\?\.abort\(\)/)
+  assert.match(fonte, /consulta\.abort\(\)/)
 })
 
 test('a página sem ID permanece em espera e mantém a inscrição ativa', async () => {
