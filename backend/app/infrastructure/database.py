@@ -1,4 +1,5 @@
 
+import os
 import sqlite3
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -7,8 +8,19 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 BACKEND_DIR = Path(__file__).resolve().parents[2]
 
-DATABASE_DIR = BACKEND_DIR / "data"
-DATABASE_PATH = DATABASE_DIR / "pontoaponto.db"
+VARIAVEL_CAMINHO_BANCO = "PONTO_A_PONTO_DATABASE_PATH"
+CAMINHO_BANCO_PADRAO = BACKEND_DIR / "data" / "pontoaponto.db"
+_caminho_configurado = os.getenv(VARIAVEL_CAMINHO_BANCO)
+if _caminho_configurado and _caminho_configurado.strip():
+    _caminho_banco = Path(_caminho_configurado).expanduser()
+    DATABASE_PATH = (
+        _caminho_banco
+        if _caminho_banco.is_absolute()
+        else (BACKEND_DIR / _caminho_banco).resolve()
+    )
+else:
+    DATABASE_PATH = CAMINHO_BANCO_PADRAO
+DATABASE_DIR = DATABASE_PATH.parent
 SCHEMA_PATH = PROJECT_ROOT / "sql" / "schema.sql"
 
 

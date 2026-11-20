@@ -101,6 +101,20 @@ export async function buscarRotas(idSimulacao, opcoes = {}) {
   return tratarResposta(resposta, 'Não foi possível carregar as rotas.')
 }
 
+// Busca o snapshot persistido, que contém origem e ID de criação dos pedidos.
+export async function buscarParametrosSimulacao(idSimulacao, opcoes = {}) {
+  const opcoesFetch = Object.keys(opcoes).length > 0 ? opcoes : undefined
+  const resposta = await fetch(
+    `${API_URL}/api/simulacoes/${idSimulacao}/parametros`,
+    opcoesFetch
+  )
+
+  return tratarResposta(
+    resposta,
+    'Não foi possível carregar a origem dos pedidos da simulação.'
+  )
+}
+
 // Cria uma nova simulação
 export async function criarSimulacao(dadosSimulacao) {
   const resposta = await fetch(`${API_URL}/api/simulacoes`, {

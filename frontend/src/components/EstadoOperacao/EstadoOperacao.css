@@ -115,18 +115,32 @@
   font-size: 13px;
 }
 
-.lista-viagens {
-  display: grid;
-  gap: 7px;
-  margin: -8px 0 0;
-  padding: 0;
-  list-style: none;
+@media (max-width: 700px) {
+  .lista-entregadores {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .estado-cabecalho {
+    align-items: flex-start;
+    gap: 14px;
+  }
+
+  .estado-total {
+    flex-shrink: 0;
+  }
 }
 
-.lista-viagens li {
-  display: flex;
-  justify-content: space-between;
-  gap: 8px;
-  color: var(--cor-texto-secundario);
-  font-size: 12px;
+@media (max-width: 480px) {
+  .estado-operacao {
+    padding: 16px;
+  }
+
+  .estado-cabecalho {
+    flex-direction: column;
+  }
+
+  .entregador-dados {
+    flex-wrap: wrap;
+    gap: 12px 18px;
+  }
 }

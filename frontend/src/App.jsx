@@ -7,8 +7,15 @@ import Indicadores from './components/Indicadores/Indicadores'
 import FilaPedidos from './components/FilaPedidos/FilaPedidos'
 import EstadoOperacao from './components/EstadoOperacao/EstadoOperacao'
 import NovoPedido from './components/NovoPedido/NovoPedido'
-import { buscarRotas, buscarSimulacao } from './services/api'
+import AcompanhamentoRotas from './components/AcompanhamentoRotas/AcompanhamentoRotas.jsx'
+import { buscarSimulacao } from './services/api'
 import { mensagemFalhaExecucao } from './utils/mensagemFalhaExecucao'
+import { INTERVALO_ATUALIZACAO_SIMULACAO_MS } from './utils/pollingSimulacao.js'
+import { criarUrlAcompanhamentoRotas } from './utils/rotasUrl.js'
+import {
+  criarIdentificadorSelecao,
+  criarSincronizadorAbasSimulacao,
+} from './utils/sincronizacaoAbasSimulacao.js'
 
 import './App.css'
 
@@ -20,20 +27,12 @@ const ROTULOS_ESTADO = {
   falhou: 'Falha na execução'
 }
 
-const intervaloConfigurado = Number(
-  import.meta.env?.VITE_INTERVALO_ATUALIZACAO_SIMULACAO_MS || 100
-)
-const INTERVALO_ATUALIZACAO_MS = Number.isFinite(intervaloConfigurado) && intervaloConfigurado > 0
-  ? intervaloConfigurado
-  : 100
-
-function App() {
+function PainelPrincipal() {
   const [paginaAtiva, setPaginaAtiva] = useState('Simulação')
 
   const [cenarioSelecionado, setCenarioSelecionado] = useState('')
   const [pedidos, setPedidos] = useState([])
   const [simulacao, setSimulacao] = useState(null)
-  const [rotas, setRotas] = useState(null)
   const [idSimulacao, setIdSimulacao] = useState(null)
   const [erroConsulta, setErroConsulta] = useState('')
   const [revisaoPedidos, setRevisaoPedidos] = useState(0)
@@ -42,6 +41,42 @@ function App() {
   const [inicioSimuladoSelecionado, setInicioSimuladoSelecionado] = useState(null)
   const revisaoEstado = useRef(0)
   const estadoSimulacaoRef = useRef(simulacao?.estado_execucao)
+  const idSimulacaoRef = useRef(idSimulacao)
+  const sincronizadorAbasRef = useRef(null)
+  const selecaoSimulacaoRef = useRef(null)
+  const ultimoEstadoPublicadoRef = useRef({ id: null, estado: null })
+
+  useEffect(() => {
+    const sincronizador = criarSincronizadorAbasSimulacao()
+    sincronizadorAbasRef.current = sincronizador
+    return () => {
+      sincronizador.fechar()
+      if (sincronizadorAbasRef.current === sincronizador) {
+        sincronizadorAbasRef.current = null
+      }
+    }
+  }, [])
+
+  const publicarEstadoEntreAbas = useCallback((estado) => {
+    if (!estado?.id || !estado.estado_execucao) {
+      ultimoEstadoPublicadoRef.current = { id: null, estado: null }
+      return
+    }
+
+    const anterior = ultimoEstadoPublicadoRef.current
+    if (anterior.id === estado.id && anterior.estado === estado.estado_execucao) return
+
+    ultimoEstadoPublicadoRef.current = {
+      id: estado.id,
+      estado: estado.estado_execucao,
+    }
+    sincronizadorAbasRef.current?.publicar({
+      tipo: 'estado_alterado',
+      simulacaoId: estado.id,
+      selecaoId: selecaoSimulacaoRef.current,
+      estadoExecucao: estado.estado_execucao,
+    })
+  }, [])
 
   useEffect(() => {
     estadoSimulacaoRef.current = simulacao?.estado_execucao
@@ -49,13 +84,35 @@ function App() {
 
   const atualizarSimulacao = useCallback((estado) => {
     revisaoEstado.current += 1
+    estadoSimulacaoRef.current = estado?.estado_execucao
     setSimulacao(estado)
     setErroConsulta('')
-  }, [])
+    publicarEstadoEntreAbas(estado)
+  }, [publicarEstadoEntreAbas])
 
   const atualizarIdSimulacao = useCallback((id) => {
+    const anterior = idSimulacaoRef.current
+    const selecaoAnterior = selecaoSimulacaoRef.current
+    idSimulacaoRef.current = id
     setIdSimulacao(id)
-    setRotas(null)
+    if (Number.isSafeInteger(id) && id > 0) {
+      const selecaoId = criarIdentificadorSelecao()
+      selecaoSimulacaoRef.current = selecaoId
+      ultimoEstadoPublicadoRef.current = { id: null, estado: null }
+      sincronizadorAbasRef.current?.publicar({
+        tipo: 'simulacao_selecionada',
+        simulacaoId: id,
+        selecaoId,
+      })
+    } else if (Number.isSafeInteger(anterior) && anterior > 0) {
+      selecaoSimulacaoRef.current = null
+      sincronizadorAbasRef.current?.publicar({
+        tipo: 'simulacao_limpa',
+        simulacaoAnteriorId: anterior,
+        selecaoId: selecaoAnterior,
+      })
+      ultimoEstadoPublicadoRef.current = { id: null, estado: null }
+    }
   }, [])
 
   const aoCadastrarPedido = useCallback((cenarioId, nomeCenario) => {
@@ -81,13 +138,11 @@ function App() {
         const estado = await buscarSimulacao(idSimulacao, {
           signal: consultaAtual.signal
         })
-        const rotasAtuais = estado.iniciada
-          ? await buscarRotas(idSimulacao, { signal: consultaAtual.signal })
-          : null
         if (!desmontado && revisaoDaConsulta === revisaoEstado.current) {
+          estadoSimulacaoRef.current = estado.estado_execucao
           setSimulacao(estado)
-          setRotas(rotasAtuais)
           setErroConsulta('')
+          publicarEstadoEntreAbas(estado)
         }
       } catch (erro) {
         if (desmontado) return
@@ -96,17 +151,17 @@ function App() {
       }
 
       if (!desmontado) {
-        temporizador = window.setTimeout(consultarEstado, INTERVALO_ATUALIZACAO_MS)
+        temporizador = window.setTimeout(consultarEstado, INTERVALO_ATUALIZACAO_SIMULACAO_MS)
       }
     }
 
-    temporizador = window.setTimeout(consultarEstado, INTERVALO_ATUALIZACAO_MS)
+    temporizador = window.setTimeout(consultarEstado, INTERVALO_ATUALIZACAO_SIMULACAO_MS)
     return () => {
       desmontado = true
       window.clearTimeout(temporizador)
       consultaAtual?.abort()
     }
-  }, [idSimulacao, simulacao?.estado_execucao])
+  }, [idSimulacao, simulacao?.estado_execucao, publicarEstadoEntreAbas])
 
   // Navega até a seção selecionada com rolagem suave
   function navegarParaSecao(nomeSecao) {
@@ -134,12 +189,11 @@ function App() {
   setCenarioListaPedidos(null)
   setNomeCenarioListaPedidos('')
   setInicioSimuladoSelecionado(null)
-  setIdSimulacao(null)
+  atualizarIdSimulacao(null)
   atualizarSimulacao(null)
-  setRotas(null)
   setPedidos([])
   setRevisaoPedidos((revisao) => revisao + 1)
-}, [atualizarSimulacao])
+}, [atualizarIdSimulacao, atualizarSimulacao])
 
   // Calcula o tempo decorrido usando o relógio do backend
   function formatarTempoSimulado() {
@@ -171,6 +225,7 @@ function App() {
       <Sidebar
         paginaAtiva={paginaAtiva}
         aoNavegar={navegarParaSecao}
+        urlRotas={criarUrlAcompanhamentoRotas(idSimulacao)}
       />
 
       <main className="conteudo-principal">
@@ -223,12 +278,22 @@ function App() {
         </div>
 
         <div id="secao-entregadores" className="secao-dashboard">
-          <EstadoOperacao simulacao={simulacao} rotas={rotas} />
+          <EstadoOperacao
+            simulacao={simulacao}
+          />
         </div>
 
       </main>
     </div>
   )
+}
+
+function App() {
+  if (typeof window !== 'undefined' && window.location.pathname.replace(/\/$/, '') === '/rotas') {
+    return <AcompanhamentoRotas />
+  }
+
+  return <PainelPrincipal />
 }
 
 export default App

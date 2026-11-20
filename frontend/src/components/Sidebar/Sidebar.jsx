@@ -9,20 +9,22 @@ import {
 import './Sidebar.css'
 import logo from '../../assets/logotipo-pontoaponto.jpeg'
 
-function Sidebar({ paginaAtiva, aoNavegar }) {
+function Sidebar({ paginaAtiva, aoNavegar, urlRotas = '/rotas' }) {
 
   const itensMenu = [
     { nome: 'Simulação', icone: Play, disponivel: true },
     { nome: 'Pedidos', icone: ClipboardList, disponivel: true },
     { nome: 'Entregadores', icone: Users, disponivel: true },
-    { nome: 'Rotas', icone: Route, disponivel: false }
+    { nome: 'Rotas', icone: Route, disponivel: true }
   ]
 
   return (
     <aside className="sidebar">
 
       <div className="sidebar-logo">
-        <img src={logo} alt="Ponto-A-Ponto" />
+        <div className="sidebar-logo__recorte">
+          <img src={logo} alt="Ponto-A-Ponto" />
+        </div>
       </div>
 
       <nav className="sidebar-menu">
@@ -40,15 +42,30 @@ function Sidebar({ paginaAtiva, aoNavegar }) {
                   ${paginaAtiva === item.nome ? 'ativo' : ''}
                   ${!item.disponivel ? 'desabilitado' : ''}
                 `}
-                onClick={() => {
+                onClick={item.nome === 'Rotas' ? undefined : () => {
                   if (item.disponivel) {
                     aoNavegar(item.nome)
                   }
                 }}
                 aria-disabled={!item.disponivel}
               >
-                <Icone size={20} strokeWidth={1.8} />
-                <span>{item.nome}</span>
+                {item.nome === 'Rotas' ? (
+                  <a
+                    className="sidebar-link-externo"
+                    href={urlRotas}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    aria-label="Abrir acompanhamento de rotas em uma nova aba"
+                  >
+                    <Icone size={20} strokeWidth={1.8} />
+                    <span>{item.nome}</span>
+                  </a>
+                ) : (
+                  <>
+                    <Icone size={20} strokeWidth={1.8} />
+                    <span>{item.nome}</span>
+                  </>
+                )}
               </li>
             )
           })}

@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
+import { readFile } from 'node:fs/promises'
 
 import {
   criarDadosCriacaoSimulacao,
@@ -18,6 +19,38 @@ test('nova simulação prepara defaults sem criar ou iniciar uma execução', as
     quantidadeEntregadores: '2',
     velocidadeSimulacao: 15
   })
+})
+
+test('nova simulação preserva a quantidade escolhida antes de preparar a próxima operação', async () => {
+  for (const quantidade of [1, 2, 3, 4, 5]) {
+    const configuracao = await obterConfiguracaoBaseNovaSimulacao({
+      cenarios: [{ id: 8, nome: 'Operação normal' }],
+      quantidadeEntregadoresPadrao: 2,
+      quantidadeEntregadoresSelecionada: String(quantidade)
+    })
+
+    assert.equal(configuracao.quantidadeEntregadores, String(quantidade))
+  }
+})
+
+test('a configuração de criação preserva exatamente as opções de 1 a 5', () => {
+  for (const quantidade of [1, 2, 3, 4, 5]) {
+    assert.equal(criarDadosCriacaoSimulacao({
+      cenarioId: '1',
+      quantidade_entregadores: quantidade,
+      segundosReaisPorHoraSimulada: 15
+    }).quantidade_entregadores, quantidade)
+  }
+})
+
+test('controle oferece 1 a 5 e envia o valor selecionado, sem restringir para dois', async () => {
+  const fonte = await readFile(new URL('./ControleSimulacao.jsx', import.meta.url), 'utf8')
+
+  for (const quantidade of [1, 2, 3, 4, 5]) {
+    assert.match(fonte, new RegExp(`<option value="${quantidade}">`))
+  }
+  assert.match(fonte, /quantidade_entregadores: Number\(quantidadeEntregadores\)/)
+  assert.match(fonte, /quantidadeEntregadoresSelecionada: quantidadeEntregadores/)
 })
 
 test('apresenta os inícios oficiais retornados para os três cenários', () => {

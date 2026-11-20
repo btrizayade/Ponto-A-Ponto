@@ -2,14 +2,22 @@ import { VELOCIDADE_SIMULACAO_PADRAO } from './velocidadeSimulacao.js'
 
 export async function obterConfiguracaoBaseNovaSimulacao({
   cenarios,
-  quantidadeEntregadoresPadrao
+  quantidadeEntregadoresPadrao,
+  quantidadeEntregadoresSelecionada
 }) {
   const cenario = cenarios[0]
   if (!cenario) throw new Error('Não há cenários disponíveis.')
 
+  const quantidadeSelecionada = Number(quantidadeEntregadoresSelecionada)
+  const quantidadeEntregadores = Number.isInteger(quantidadeSelecionada)
+    && quantidadeSelecionada >= 1
+    && quantidadeSelecionada <= 5
+    ? String(quantidadeSelecionada)
+    : String(quantidadeEntregadoresPadrao)
+
   return {
     cenarioId: String(cenario.id),
-    quantidadeEntregadores: String(quantidadeEntregadoresPadrao),
+    quantidadeEntregadores,
     velocidadeSimulacao: VELOCIDADE_SIMULACAO_PADRAO
   }
 }
