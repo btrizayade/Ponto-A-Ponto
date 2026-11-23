@@ -22,6 +22,12 @@ Além da execução da operação, o sistema permite acompanhar o estado dos ped
 
 O projeto também funciona como um ambiente experimental: diferentes cenários e estratégias podem ser executados sob parâmetros pré-definidos com o objetivo de comparar decisões logísticas.
 
+## Preview
+<img width="1517" height="705" alt="image" src="https://github.com/user-attachments/assets/395f6869-f43b-404c-90e7-baf4b751b6e5" />
+<img width="1477" height="820" alt="image" src="https://github.com/user-attachments/assets/23ae6593-8d75-4347-8a5f-6c896a1cfb31" />
+<img width="1256" height="737" alt="image" src="https://github.com/user-attachments/assets/cb17b118-7846-4ab5-8331-c12ff1c6ff39" />
+
+
 ## Objetivos
 
 - Modelar o despacho de pedidos por meio de uma fila de prioridade baseada em heap.
@@ -61,13 +67,6 @@ Considera o desempenho de SLA entre bairros e adiciona uma penalidade territoria
 
 A quantidade de entregadores é configurável pelo usuário de acordo com a simulação. Cada entregador respeita os limites definidos no domínio, incluindo quantidade máxima de paradas, peso e volume por viagem. Quando necessário, um entregador pode realizar múltiplas viagens com retorno ao centro de distribuição.
 
-## Roteirização
-- Contrato de serviço de roteamento independente do provedor.
-- Provedor simulado para desenvolvimento, testes e experimentos controlados.
-- Integração opcional com a Google Routes API.
-- Cache persistente para resultados de roteamento.
-- Registro das consultas e respostas utilizadas em cada simulação.
-- Geometrias de rota conectadas ao frontend para visualização.
   
 ## Acompanhamento da simulação
 - Relógio simulado independente do relógio civil do computador.
