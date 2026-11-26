@@ -153,7 +153,7 @@ function NovoPedido({ aoCadastrar }) {
       <div className="novo-pedido-cabecalho">
         <div>
           <h2>Adicionar novo pedido</h2>
-          <p>Escolha o cenário e os dados principais do pedido.</p>
+          <p>Para adicionar um novo pedido, insira os dados em + Adicionar pedido.</p>
         </div>
         <button
           type="button"
@@ -175,7 +175,7 @@ function NovoPedido({ aoCadastrar }) {
       </div>
 
       <p className="novo-pedido-aviso">
-        Pedidos cadastrados durante uma simulação ficam disponíveis na próxima execução.
+        Pedidos cadastrados durante uma simulação em andamento ficam disponíveis apenas na próxima execução.
       </p>
 
       {carregandoOpcoes && <p role="status">Carregando opções do cadastro...</p>}

@@ -155,7 +155,7 @@ function FilaPedidos({
             {nomeCenarioExibicao && `Cenário: ${nomeCenarioExibicao}. `}
             {simulacaoDaLista
               ? 'Pedidos organizados pela prioridade de atendimento'
-              : 'Pedidos registrados no cenário, aguardando a simulação'}
+              : 'Aguardando a simulação'}
           </p>
           {inicioSelecionadoTexto && (
             <p className="fila-inicio-simulado">
@@ -183,10 +183,6 @@ function FilaPedidos({
 
         {erro && (
           <p>{erro}</p>
-        )}
-
-        {!carregando && !erro && pedidosExibidos.length === 0 && (
-          <p>Nenhum pedido encontrado para este cenário.</p>
         )}
 
         {!carregando && !erro && pedidosOrdenados.map((pedido) => (
